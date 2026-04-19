@@ -1,5 +1,5 @@
 // Synex Frontend Configuration Example
 window.SYNEX_CONFIG = {
-    // URL of the deployed FastAPI backend
-    API_URL: "http://localhost:8000/analyze"
+    // Replace with your live API URL (e.g. https://your-app.onrender.com/analyze)
+    API_URL: "https://synex-api.onrender.com/analyze"
 };
