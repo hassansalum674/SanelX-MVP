@@ -1,11 +1,37 @@
 import { REGION_DEFAULTS } from './profiles/solarProfiles.js';
 import { generateSolarArray, generateScaledDemandArray } from './utils/generateProfiles.js';
 
+// --- Firebase Initialization ---
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import { 
+    getAuth, 
+    signInWithPopup, 
+    GoogleAuthProvider, 
+    onAuthStateChanged, 
+    signOut,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyChBYiaxQ2F58C0uBRopU-g6US0E9npLWo",
+    authDomain: "sanelx-a681c.firebaseapp.com",
+    projectId: "sanelx-a681c",
+    storageBucket: "sanelx-a681c.firebasestorage.app",
+    messagingSenderId: "429996696902",
+    appId: "1:429996696902:web:f49930cd4aedfe78783147" // Reconstructed for web
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+
 // Configurable API URL from config.js
 const API_URL = window.SYNEX_CONFIG?.API_URL || 'http://localhost:8000/analyze';
 let isUnlocked = false;
 let currentUser = null;
 let energyChartInstance = null;
+let authMode = 'signin'; // 'signin' or 'signup'
 
 const SAMPLE_DATA = {
     "solar_kw": 5.0,
@@ -658,16 +684,30 @@ function updateAuthStateUI() {
     }
 }
 
-function handleAuthSuccess(email) {
-    currentUser = { email };
+function handleAuthSuccess(user) {
+    currentUser = user;
     closeAuthModal();
     updateAuthStateUI();
 }
 
 function handleSignOut() {
-    currentUser = null;
-    updateAuthStateUI();
+    signOut(auth).then(() => {
+        currentUser = null;
+        updateAuthStateUI();
+    }).catch((error) => {
+        console.error("Sign out error", error);
+    });
 }
+
+// --- Firebase Auth Observer ---
+onAuthStateChanged(auth, (user) => {
+    if (user) {
+        currentUser = user;
+    } else {
+        currentUser = null;
+    }
+    updateAuthStateUI();
+});
 
 // Event Listeners
 if(headerSigninBtn) headerSigninBtn.addEventListener('click', openAuthModal);
@@ -689,33 +729,55 @@ tabBtns.forEach(btn => {
     });
 });
 
-// Mock Email/Password form submit
+// Real Firebase Email/Password Auth
 authForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const email = document.getElementById('auth-email').value;
+    const password = document.getElementById('auth-password').value;
     const btnText = authMode === 'signin' ? 'Signing In...' : 'Creating Account...';
     
+    const originalBtnText = authSubmitBtnText.textContent;
     authSubmitBtnText.textContent = btnText;
-    const originalBtnContent = authSubmitBtnText.innerHTML;
-    
-    // Simulate network delay
-    setTimeout(() => {
-        handleAuthSuccess(email);
-        authSubmitBtnText.innerHTML = originalBtnContent; // reset
-        authForm.reset();
-    }, 800);
+
+    if (authMode === 'signup') {
+        createUserWithEmailAndPassword(auth, email, password)
+            .then((userCredential) => {
+                handleAuthSuccess(userCredential.user);
+                authSubmitBtnText.textContent = originalBtnText;
+                authForm.reset();
+            })
+            .catch((error) => {
+                alert("Error creating account: " + error.message);
+                authSubmitBtnText.textContent = originalBtnText;
+            });
+    } else {
+        signInWithEmailAndPassword(auth, email, password)
+            .then((userCredential) => {
+                handleAuthSuccess(userCredential.user);
+                authSubmitBtnText.textContent = originalBtnText;
+                authForm.reset();
+            })
+            .catch((error) => {
+                alert("Login Error: " + error.message);
+                authSubmitBtnText.textContent = originalBtnText;
+            });
+    }
 });
 
-// Mock Google Auth click
+// Real Firebase Google Auth
 googleAuthBtn.addEventListener('click', () => {
     const originalContent = googleAuthBtn.innerHTML;
     googleAuthBtn.innerHTML = 'Connecting to Google...';
     
-    // Simulate network popup delay
-    setTimeout(() => {
-        handleAuthSuccess("google_user@gmail.com");
-        googleAuthBtn.innerHTML = originalContent; // reset
-    }, 1000);
+    signInWithPopup(auth, googleProvider)
+        .then((result) => {
+            handleAuthSuccess(result.user);
+            googleAuthBtn.innerHTML = originalContent;
+        })
+        .catch((error) => {
+            alert("Google Sign-in Error: " + error.message);
+            googleAuthBtn.innerHTML = originalContent;
+        });
 });
 
 // Download PDF logic
