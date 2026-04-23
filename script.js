@@ -2,6 +2,7 @@ import { REGION_DEFAULTS } from './profiles/solarProfiles.js';
 import { generateSolarArray, generateScaledDemandArray } from './utils/generateProfiles.js';
 
 // --- Firebase Initialization ---
+// Synex v1.1.2 - Migration to Render + GitHub Actions Deploy
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
 import { 
     getAuth, 
