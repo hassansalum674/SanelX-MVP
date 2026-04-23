@@ -1,0 +1,25 @@
+services:
+  # Static Site for the Frontend
+  - type: static
+    name: synex-frontend
+    env: static
+    buildCommand: ""
+    publishDir: "."
+    headers:
+      - path: "/*"
+        name: Cache-Control
+        value: no-cache
+    routes:
+      - type: rewrite
+        source: "/*"
+        destination: "/index.html"
+
+  # Web Service for the Backend (Already exists, but here for reference)
+  - type: web
+    name: synex-api
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: "https://synex-frontend.onrender.com" # Update this once you have the URL

@@ -22,3 +22,4 @@ Thumbs.db
 # Test outputs
 test_response.json
 test_response_*.json
+service-account.json

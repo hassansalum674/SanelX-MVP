@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "sanelx-a681c"
-  }
+  },
+  "targets": {
+    "sanelx-a681c": {
+      "hosting": {
+        "frontend-a-a": [
+          "frontend-a-a"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
