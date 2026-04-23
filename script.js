@@ -86,8 +86,77 @@ function markResultsStale() {
     }
 }
 
-// Initial setup
+// --- Form Persistence ---
+function saveFormState() {
+    const formData = {
+        country: document.getElementById('country').value,
+        climate: document.getElementById('climate').value,
+        usage_type: document.getElementById('usage_type').value,
+        solar_kw: document.getElementById('solar_kw').value,
+        battery_kwh: document.getElementById('battery_kwh').value,
+        initial_battery_kwh: document.getElementById('initial_battery_kwh').value,
+        grid_price: document.getElementById('grid_price').value,
+        weather_scenario: document.getElementById('weather_scenario').value,
+        solar_cost_kw: document.getElementById('solar_cost_kw').value,
+        battery_cost_kwh: document.getElementById('battery_cost_kwh').value,
+        install_fee: document.getElementById('install_fee').value,
+        maint_pct: document.getElementById('maint_pct').value,
+        hourly_demand: document.getElementById('hourly_demand').value,
+        hourly_solar_profile: document.getElementById('hourly_solar_profile').value,
+        isAdvanced: document.getElementById('advanced-toggle').checked,
+        isCostAdvanced: document.getElementById('cost-advanced-toggle').checked
+    };
+    localStorage.setItem('synex_form_data', JSON.stringify(formData));
+}
+
+function loadFormState() {
+    const saved = localStorage.getItem('synex_form_data');
+    if (!saved) return;
+    try {
+        const data = JSON.parse(saved);
+        if (data.country) document.getElementById('country').value = data.country;
+        if (data.climate) document.getElementById('climate').value = data.climate;
+        if (data.usage_type) document.getElementById('usage_type').value = data.usage_type;
+        if (data.solar_kw) document.getElementById('solar_kw').value = data.solar_kw;
+        if (data.battery_kwh) document.getElementById('battery_kwh').value = data.battery_kwh;
+        if (data.initial_battery_kwh) document.getElementById('initial_battery_kwh').value = data.initial_battery_kwh;
+        if (data.grid_price) document.getElementById('grid_price').value = data.grid_price;
+        if (data.weather_scenario) document.getElementById('weather_scenario').value = data.weather_scenario;
+        if (data.solar_cost_kw) document.getElementById('solar_cost_kw').value = data.solar_cost_kw;
+        if (data.battery_cost_kwh) document.getElementById('battery_cost_kwh').value = data.battery_cost_kwh;
+        if (data.install_fee) document.getElementById('install_fee').value = data.install_fee;
+        if (data.maint_pct) document.getElementById('maint_pct').value = data.maint_pct;
+        if (data.hourly_demand) document.getElementById('hourly_demand').value = data.hourly_demand;
+        if (data.hourly_solar_profile) document.getElementById('hourly_solar_profile').value = data.hourly_solar_profile;
+        
+        if (data.isAdvanced) {
+            document.getElementById('advanced-toggle').checked = true;
+            document.getElementById('advanced-inputs').style.display = 'block';
+        }
+        if (data.isCostAdvanced) {
+            document.getElementById('cost-advanced-toggle').checked = true;
+            document.getElementById('cost-advanced-inputs').style.display = 'block';
+        }
+    } catch (e) {
+        console.error("Error loading form state", e);
+    }
+}
+
+// Attach change listeners to all inputs for auto-save
+const allInputIds = [
+    'country', 'climate', 'usage_type', 'solar_kw', 'battery_kwh', 
+    'initial_battery_kwh', 'grid_price', 'weather_scenario', 
+    'solar_cost_kw', 'battery_cost_kwh', 'install_fee', 'maint_pct',
+    'hourly_demand', 'hourly_solar_profile', 'advanced-toggle', 'cost-advanced-toggle'
+];
+allInputIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', saveFormState);
+});
+
+// Initial load
 document.addEventListener('DOMContentLoaded', () => {
+    loadFormState();
     updateProfiles();
     updateAuthStateUI();
 });
@@ -678,14 +747,21 @@ function updatePremiumGate() {
             }, 0);
         } else if (!isPremium) {
             lockedMessage.innerHTML = `
-                Your account is active. Upgrade to Premium to unlock seasonal forecasting and ROI optimization.<br>
-                <button id="upgrade-premium-btn" class="primary" style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem; justify-content: center; width: 100%;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                    Upgrade to Premium
-                </button>
-                <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
-                    <p style="font-size: 0.8rem; color: var(--text-secondary);">Already paid but still locked?</p>
-                    <button id="confirm-purchase-btn" class="secondary" style="margin-top: 0.5rem; padding: 0.5rem 1rem; font-size: 0.8rem; width: 100%;">Confirm My Purchase</button>
+                <div style="background: rgba(255, 255, 255, 0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+                    <p style="margin-bottom: 1rem; font-weight: 500;">Your account is active. Upgrade to Premium to unlock monthly access.</p>
+                    <button id="upgrade-premium-btn" class="primary" style="display: flex; align-items: center; gap: 0.5rem; justify-content: center; width: 100%;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                        Upgrade to Premium
+                    </button>
+                    <div style="margin-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem; text-align: left;">
+                        <p style="font-size: 0.85rem; color: #ffd700; margin-bottom: 0.5rem; font-weight: bold;">⚠️ After Payment:</p>
+                        <p style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
+                            1. Check your email for a receipt from Gumroad.<br>
+                            2. Keep this tab open; it will unlock <strong>automatically</strong>.<br>
+                            3. Your 30-day access starts the moment you pay.
+                        </p>
+                        <button id="confirm-purchase-btn" class="secondary" style="margin-top: 1rem; padding: 0.5rem 1rem; font-size: 0.8rem; width: 100%;">Already Paid? Refresh Status</button>
+                    </div>
                 </div>
             `;
             if (unlockBtn) unlockBtn.style.display = 'none';
@@ -889,7 +965,11 @@ function handleUpgradeClick() {
     const email = currentUser ? currentUser.email : "";
     const uid = currentUser ? currentUser.uid : "";
     
-    alert("After completing your payment, please return to this tab. Your account will automatically unlock within a few seconds of payment confirmation!");
+    // Save current form state so it's not lost on redirect/refresh
+    saveFormState();
+    
+    // Inform the user of the flow with more detail
+    alert("IMPORTANT: After paying on Gumroad, check your email for a receipt. Your premium status will unlock automatically in this tab within seconds. Do NOT close this tab!");
     
     // Open in a new tab so they don't lose their place in Synex
     window.open(`${gumroadUrl}?email=${encodeURIComponent(email)}&user_id=${encodeURIComponent(uid)}`, '_blank');
