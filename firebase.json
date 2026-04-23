@@ -1,0 +1,25 @@
+{
+  "hosting": {
+    "site": "frontend-a-a",
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "*.py",
+      "Dockerfile",
+      "requirements.txt",
+      "engine/**",
+      "sample_data/**",
+      "*.md",
+      "response_check.json",
+      "sample_request.json"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

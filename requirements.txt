@@ -1,5 +1,6 @@
 fastapi
-uvicorn[standard]
+uvicorn
 pydantic
 python-dotenv
+firebase-admin
 python-multipart

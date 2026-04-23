@@ -28,40 +28,40 @@ class SmartAdvisor:
 
         # 1. Structured Professional Insight
         # A. What is happening
-        what = "The system is currently balancing generation and demand."
+        what = "Energy generation and usage are currently balanced for optimal reliability."
         if unmet > 0:
-            what = f"The system is failing to meet {unmet:.1f}kWh of daily demand."
+            what = f"The current system setup is unable to meet {unmet:.1f}kWh of your daily demand, leading to potential operational disruptions."
         elif grid_dep > 50:
-            what = "Your property remains heavily reliant on expensive grid energy."
+            what = "High operational expenditure detected; the property remains heavily reliant on expensive grid energy during critical hours."
         elif wasted_solar > 5:
-            what = "A significant volume of free solar energy is being discarded."
+            what = "Capital inefficiency detected: a significant volume of free solar energy is being discarded instead of being stored for later use."
         
         # B. Why it is happening
-        why = "Solar generation and battery capacity are currently in sync with usage."
+        why = "The system is currently matched to your demand profile."
         if unmet > 0:
-            why = "Current storage and generation ceilings are too low for peak load spikes."
+            why = "Peak energy demands are exceeding the current generation and storage ceiling."
         elif grid_dep > 50 and solar_capacity < (daily_usage / 4):
-            why = "The solar array is undersized relative to your {daily_usage:.1f}kWh daily consumption."
+            why = "The current solar array is undersized relative to your daily consumption, forcing reliance on external power."
         elif wasted_solar > 5 and battery_capacity < solar_capacity:
-            why = "The battery hits full capacity early in the day, leaving midday solar with nowhere to go."
+            why = "The storage system reaches capacity too early, leaving no room to capture high-value midday solar energy."
 
         # C. Weakness detected
-        weakness = "None identified for this specific profile."
+        weakness = "System is performing within expected parameters."
         if unmet > 0:
-            weakness = "Critical energy deficit during peak hours."
+            weakness = "Critical energy deficit during peak operational windows."
         elif grid_dep > 50 and wasted_solar > 2:
-            weakness = "Poor Energy Time-Shifting (Solar waste vs Nighttime grid reliance)."
+            weakness = "Inefficient energy time-shifting; high nighttime grid dependency despite high daytime solar waste."
         elif not is_favorable:
-            weakness = "High capital expenditure relative to grid savings."
+            weakness = "Investment viability is limited by high hardware costs relative to current grid savings."
 
         # D. Best Next Action (Quantified)
-        action = "Maintain current setup and monitor seasonal variations."
+        action = "Monitor seasonal variations and maintain current energy hygiene."
         if unmet > 0:
-            action = "Immediately increase solar by 2kW and battery by 5kWh to ensure reliability."
+            action = "Immediately expand solar capacity and storage to protect against operational downtime."
         elif wasted_solar > 3:
-            action = f"Add {max(5, int(wasted_solar * 1.5))}kWh of battery capacity to capture ${wasted_solar * grid_price * 365:.0f}/yr in wasted solar."
+            action = f"Expanding storage by {max(5, int(wasted_solar * 1.5))}kWh is projected to capture an additional ${wasted_solar * grid_price * 365:.0f}/yr in energy value."
         elif grid_dep > 60:
-            action = "Expand the solar array capacity by 50% to improve daytime coverage."
+            action = "Expanding the solar array by 50% is recommended to reduce long-term grid dependency."
 
         # 2. Key Action Plan (3 Step Roadmap)
         plan = self._generate_plan(unmet, wasted_solar, grid_dep, is_favorable)
@@ -79,19 +79,19 @@ class SmartAdvisor:
         }
 
     def _get_reliability_note(self, unmet, battery_capacity, grid_dep) -> str:
-        if unmet > 0: return "Low reliability. Frequent power shortages expected."
-        if battery_capacity == 0: return "Medium reliability. Vulnerable to grid outages at night."
-        if grid_dep < 15: return "Exceptional resilience. Capable of off-grid operation."
-        return "Standard reliability for grid-tied solar."
+        if unmet > 0: return "Low operational reliability. Frequent shortages expected."
+        if battery_capacity == 0: return "Vulnerable to grid fluctuations and nighttime outages."
+        if grid_dep < 15: return "High energy independence; capable of sustained off-grid operation."
+        return "Standard reliability for grid-tied solar assets."
 
     def _generate_plan(self, unmet, wasted_solar, grid_dep, is_favorable) -> List[str]:
         if unmet > 0:
-            return ["Reduce non-essential loads immediately.", "Consult installer for array expansion.", "Verify battery discharge peak limits."]
+            return ["Increase solar array capacity immediately.", "Prioritize battery expansion for critical loads.", "Implement energy load management."]
         if wasted_solar > 2:
-            return ["Identify loads to move to 11am-2pm.", "Increase battery capacity to bridge evening gap.", "Install EMS to automate solar priority."]
+            return ["Optimize load scheduling for peak solar hours.", "Increase storage capacity to bridge the evening gap.", "Install smart energy controls to automate savings."]
         if not is_favorable:
-            return ["Re-evaluate battery sizing strategy.", "Check for local solar tax credits.", "Monitor grid price hike forecasts."]
-        return ["Schedule bi-annual panel cleaning.", "Set battery DoD to 80% for longevity.", "Update profile if large appliances are added."]
+            return ["Optimize battery sizing to maximize ROI.", "Investigate local incentives or tax credits.", "Hedge against forecasted grid price increases."]
+        return ["Maintain panels for peak efficiency.", "Configure battery settings for maximum longevity.", "Review ROI annually as grid prices fluctuate."]
 
     def _generate_explanation(self, what, why, action) -> str:
         return f"{what} {why} {action} This assessment is based on a 24-hour simulation using current regional solar values and your specific demand profile."

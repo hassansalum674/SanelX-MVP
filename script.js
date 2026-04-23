@@ -10,8 +10,16 @@ import {
     onAuthStateChanged, 
     signOut,
     createUserWithEmailAndPassword,
-    signInWithEmailAndPassword
+    signInWithEmailAndPassword,
+    sendEmailVerification
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+import { 
+    getFirestore, 
+    doc, 
+    getDoc, 
+    setDoc, 
+    onSnapshot 
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyChBYiaxQ2F58C0uBRopU-g6US0E9npLWo",
@@ -24,11 +32,12 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
+const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
 // Configurable API URL from config.js
-const API_URL = window.SYNEX_CONFIG?.API_URL || 'http://localhost:8000/analyze';
-let isUnlocked = false;
+const API_BASE_URL = window.SYNEX_CONFIG?.API_URL?.replace('/analyze', '') || 'http://localhost:8000';
+const ANALYZE_URL = `${API_BASE_URL}/analyze`;
 let currentUser = null;
 let energyChartInstance = null;
 let authMode = 'signin'; // 'signin' or 'signup'
@@ -197,9 +206,6 @@ document.getElementById('analyze-form').addEventListener('submit', async (e) => 
     btnText.textContent = 'Analyzing...';
     errorMsg.style.display = 'none';
     
-    // Reset unlock state on new analysis
-    isUnlocked = false;
-
     try {
         const payload = {
             solar_kw: parseFloat(document.getElementById('solar_kw').value),
@@ -222,7 +228,7 @@ document.getElementById('analyze-form').addEventListener('submit', async (e) => 
             throw new Error('Both hourly profiles must contain exactly 24 values.');
         }
 
-        const response = await fetch(API_URL, {
+        const response = await fetch(ANALYZE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -267,27 +273,65 @@ function currentPaybackYears(summary, assumptions) {
 
 function renderResults(data) {
     const s = data.summary;
-    const recs = data.recommendations;
     const premium = data.premium_insights;
-    const notes = data.model_notes || [];
-    const assumptions = data.assumptions || {};
     const advisor = data.advisor || {};
+    const assumptions = data.assumptions || {};
+    const roi = premium.smart_recommendation;
 
-    // 0. Update Advisor Hero
-    const insight = advisor.professional_insight || {};
-    const scenario = s.weather_scenario || "average";
-    const scenarioName = document.querySelector(`#weather_scenario option[value="${scenario}"]`).innerText;
+    // 1. INVESTMENT SUMMARY HERO
+    const annualSavings = (premium.savings_forecast.optimal_annual_savings || 0);
+    document.getElementById('hero-savings').innerText = `$${annualSavings.toFixed(0)}`;
     
-    document.getElementById('advisor-weakness').innerText = `${scenarioName}: ${insight.weakness || "Analysis complete."}`;
-    document.getElementById('advisor-improvement').innerText = insight.best_next_action || "No specific improvement suggested.";
-    document.getElementById('advisor-opportunity').innerText = advisor.cost_saving_opportunity || "--";
-    document.getElementById('advisor-reliability').innerText = advisor.reliability_note || "--";
+    let heroRec = "Optimal Investment Pathway";
+    if (roi.best_capacity === 0) heroRec = "Grid-Optimized Strategy";
+    else if (roi.best_capacity > s.battery_throughput_kwh) heroRec = "Asset Expansion Recommended";
+    document.getElementById('hero-recommendation').innerText = heroRec;
 
-    if (s.sim_days > 1) {
-        document.getElementById('advisor-reliability').innerHTML += `<br><small style="color:var(--error-color)">Lowest Storage: ${s.lowest_soc_reached.toFixed(1)}kWh during ${s.sim_days}-day stress test</small>`;
+    const insight = advisor.professional_insight || {};
+    document.getElementById('hero-reason').innerText = insight.best_next_action || "Analysis indicates this configuration balances hardware cost with maximum energy savings.";
+
+    // 2. INVESTMENT DECISION BOX
+    const statusEl = document.getElementById('decision-status');
+    const reasonEl = document.getElementById('decision-reason');
+    const confidenceEl = document.getElementById('decision-confidence');
+    
+    let status = 'WAIT';
+    let statusClass = 'status-wait';
+    let confidence = 'Medium';
+    let decisionReason = "System payback is within commercial thresholds.";
+
+    if (roi.best_capacity === 0) {
+        status = 'NO INVESTMENT';
+        statusClass = 'status-no';
+        confidence = 'High';
+        decisionReason = "Grid-only reliance currently offers superior financial protection.";
+    } else if (roi.is_payback_favorable) {
+        status = 'BUY ASSET';
+        statusClass = 'status-buy';
+        confidence = roi.payback_years < 10 ? 'High' : 'Medium';
+        decisionReason = `Projected ROI achieved in ${roi.payback_years.toFixed(1)} years.`;
+    } else {
+        status = 'HOLD / MONITOR';
+        statusClass = 'status-wait';
+        confidence = 'Low';
+        decisionReason = "Payback horizon exceeds 20 years; awaiting better hardware pricing.";
     }
 
-    // Action Plan
+    statusEl.innerText = status;
+    statusEl.className = `decision-status ${statusClass}`;
+    reasonEl.innerText = decisionReason;
+    confidenceEl.innerText = confidence;
+
+    // 3. KEY PERFORMANCE INSIGHTS
+    const insightsList = document.getElementById('key-insights-list');
+    insightsList.innerHTML = `
+        <div class="insight-item"><strong>Operational Impact:</strong> ${insight.what}</div>
+        <div class="insight-item"><strong>Financial Opportunity:</strong> ${advisor.cost_saving_opportunity || "Strategic shifting of high-energy loads to peak solar hours."}</div>
+        <div class="insight-item"><strong>Reliability Profile:</strong> ${advisor.reliability_note || "Standard grid-tied asset resilience."}</div>
+        <div class="insight-item"><strong>Solar Utilization:</strong> Your array satisfies ${(s.solar_coverage_percent || 0).toFixed(0)}% of your total energy demand.</div>
+    `;
+
+    // 4. PRIORITIZED ACTION PLAN
     const actionPlan = document.getElementById('action-plan');
     if (advisor.action_plan && advisor.action_plan.length > 0) {
         actionPlan.innerHTML = advisor.action_plan.map((step, i) => `
@@ -298,103 +342,28 @@ function renderResults(data) {
         `).join('');
     }
 
-    // Modal Explainer logic
-    const explainBtn = document.getElementById('explain-results-btn');
-    explainBtn.onclick = () => {
-        document.getElementById('explanation-body').innerText = advisor.full_explanation || "Detailed analysis not available.";
-        document.getElementById('explanation-modal').classList.add('active');
-    };
-
-    // 1. Render Model Notes (Sanity Checks)
-    const notesContainer = document.getElementById('model-notes-container');
-    if (notes && notes.length > 0) {
-        notesContainer.innerHTML = notes.map(n => `<div class="model-note-item">${n}</div>`).join('');
-        notesContainer.style.display = 'block';
-    } else {
-        notesContainer.style.display = 'none';
-    }
-
-    // 2. Render Basic Summary
-    const summaryGrid = document.getElementById('summary-grid');
-    summaryGrid.innerHTML = `
-        <div class="summary-card">
-            <span class="summary-label">Solar Coverage</span>
-            <span class="summary-val">${(s.solar_coverage_percent || 0).toFixed(1)}%</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Demand met by solar</small>
-        </div>
-        <div class="summary-card">
-            <span class="summary-label">Grid Dependency</span>
-            <span class="summary-val">${(s.grid_dependency_percent || 0).toFixed(1)}%</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Demand met by grid</small>
-        </div>
-        <div class="summary-card">
-            <span class="summary-label">Daily Operational Cost</span>
-            <span class="summary-val">$${(s.total_operational_cost || 0).toFixed(2)}</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Grid: $${(s.total_grid_cost || 0).toFixed(2)} | Wear: $${(s.battery_degradation_cost || 0).toFixed(2)}</small>
-        </div>
-        <div class="summary-card">
-            <span class="summary-label">Unmet Demand</span>
-            <span class="summary-val">${(s.total_unmet_demand || 0).toFixed(2)} kWh</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Energy not supplied</small>
-        </div>
-    `;
-
-    const previewRec = document.getElementById('preview-recommendation');
-    if (recs.length > 0) {
-        previewRec.innerHTML = `<div class="recommendation-item" style="border-left-color: var(--accent-color); background: rgba(186, 155, 110, 0.1);"><strong>Insight:</strong> ${recs[0]}</div>`;
-    } else {
-        previewRec.innerHTML = '';
-    }
-
-    // 3. Render Assumptions Panel
-    const assumptionsSection = document.getElementById('assumptions-panel');
-    const assumptionsContent = document.getElementById('assumptions-content');
-    
-    // Detailed assumptions for trust
-    const country = document.getElementById('country').value;
-    const usageType = document.getElementById('usage_type').value;
-    const climateType = document.getElementById('climate').value;
-
-    assumptionsContent.innerHTML = `
-        <div class="assumption-chip"><span>Region</span><span>${country}</span></div>
-        <div class="assumption-chip"><span>Usage Type</span><span>${usageType}</span></div>
-        <div class="assumption-chip"><span>Solar Preset</span><span>${climateType}</span></div>
-        <div class="assumption-chip"><span>Grid Tariff</span><span>$${assumptions.grid_price}/kWh</span></div>
-        <div class="assumption-chip"><span>Batt. Efficiency</span><span>${(assumptions.battery_efficiency * 100).toFixed(0)}%</span></div>
-        <div class="assumption-chip"><span>Min. Reserve</span><span>${(assumptions.battery_min_soc * 100).toFixed(0)}%</span></div>
-        <div class="assumption-chip"><span>Capital Basis</span><span>$${assumptions.battery_cost_per_kwh}/kWh</span></div>
-        <div class="assumption-chip"><span>Analysis Horizon</span><span>24h Simulation</span></div>
-    `;
-    assumptionsSection.style.display = 'block';
-
-    // 4. Render Premium Charts & Callouts
-    renderChart(data.hourly, premium.key_moments);
-
-    // Populate Reliability & Sensitivity
-    document.getElementById('reliability-score').innerText = (premium.reliability_score || 0).toFixed(0);
-    
-    // Seasonal Grid
+    // 5. SEASONAL PERFORMANCE (RESTORED)
     const so = premium.seasonal_outlook;
     document.getElementById('seasonal-grid').innerHTML = `
         <div class="summary-card">
-            <span class="summary-label">Sunny Season (Est.)</span>
+            <span class="summary-label">High-Solar Season (Est.)</span>
             <span class="summary-val">$${so.sunny.daily_cost.toFixed(2)}/day</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">${so.sunny.solar_cov.toFixed(0)}% Solar Coverage</small>
+            <small>${so.sunny.solar_cov.toFixed(0)}% Solar Coverage</small>
         </div>
         <div class="summary-card">
-            <span class="summary-label">Cloudy Season (Est.)</span>
+            <span class="summary-label">Low-Solar Season (Est.)</span>
             <span class="summary-val">$${so.cloudy.daily_cost.toFixed(2)}/day</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">${so.cloudy.solar_cov.toFixed(0)}% Solar Coverage</small>
+            <small>${so.cloudy.solar_cov.toFixed(0)}% Solar Coverage</small>
         </div>
     `;
 
-    // Sensitivity Table
+    // 6. SENSITIVITY TEST (RESTORED)
     const sen = premium.sensitivity;
     document.getElementById('sensitivity-container').innerHTML = `
         <table class="premium-table">
             <thead>
                 <tr>
-                    <th>Grid Tariff Hike</th>
+                    <th>Grid Rate Hike</th>
                     <th>+10%</th>
                     <th>+25%</th>
                     <th>+50%</th>
@@ -402,13 +371,13 @@ function renderResults(data) {
             </thead>
             <tbody>
                 <tr>
-                    <td>Daily Expense</td>
+                    <td>Daily Cost Impact</td>
                     <td>$${sen.price_10.toFixed(2)}</td>
                     <td>$${sen.price_25.toFixed(2)}</td>
                     <td>$${sen.price_50.toFixed(2)}</td>
                 </tr>
                 <tr>
-                    <td>Est. Monthly Impact</td>
+                    <td>Monthly Projected</td>
                     <td>+$${((sen.price_10 - s.total_grid_cost) * 30).toFixed(0)}</td>
                     <td>+$${((sen.price_25 - s.total_grid_cost) * 30).toFixed(0)}</td>
                     <td>+$${((sen.price_50 - s.total_grid_cost) * 30).toFixed(0)}</td>
@@ -417,137 +386,140 @@ function renderResults(data) {
         </table>
     `;
 
-    // Populate Premium Savings Forecast
+    // 7. CURRENT ASSET PERFORMANCE (RESTORED SUMMARY)
+    const summaryGrid = document.getElementById('summary-grid');
+    summaryGrid.innerHTML = `
+        <div class="summary-card">
+            <span class="summary-label">Solar Coverage</span>
+            <span class="summary-val">${(s.solar_coverage_percent || 0).toFixed(1)}%</span>
+            <small>Energy met by sun</small>
+        </div>
+        <div class="summary-card">
+            <span class="summary-label">Reliance on Grid</span>
+            <span class="summary-val">${(s.grid_dependency_percent || 0).toFixed(1)}%</span>
+            <small>Energy from utility</small>
+        </div>
+        <div class="summary-card">
+            <span class="summary-label">Daily Operating Cost</span>
+            <span class="summary-val">$${(s.total_operational_cost || 0).toFixed(2)}</span>
+            <small>Grid: $${(s.total_grid_cost || 0).toFixed(2)} | Wear: $${(s.battery_degradation_cost || 0).toFixed(2)}</small>
+        </div>
+        <div class="summary-card">
+            <span class="summary-label">Energy Not Supplied</span>
+            <span class="summary-val">${(s.total_unmet_demand || 0).toFixed(2)} kWh</span>
+            <small>Unmet critical load</small>
+        </div>
+    `;
+
+    // 8. PROJECTED GRID EXPENSE (RESTORED SAVINGS GRID)
     const sf = premium.savings_forecast;
     document.getElementById('savings-grid').innerHTML = `
         <div class="summary-card">
-            <span class="summary-label">Monthly Grid Project.</span>
+            <span class="summary-label">Monthly Expense Forecast</span>
             <span class="summary-val">$${(sf.monthly_cost || 0).toFixed(2)}</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Pure electricity usage</small>
+            <small>Projected utility bill</small>
         </div>
         <div class="summary-card">
-            <span class="summary-label">Annual Grid Project.</span>
+            <span class="summary-label">Annual Expense Forecast</span>
             <span class="summary-val">$${(sf.annual_cost || 0).toFixed(2)}</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">12-month consumption</small>
+            <small>12-month grid dependency</small>
         </div>
         <div class="summary-card" style="border-color: var(--success-color);">
             <span class="summary-label">Net Annual Savings</span>
             <span class="summary-val" style="color: var(--success-color);">+$${(sf.optimal_annual_savings || 0).toFixed(0)}/yr</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Vs. no-battery baseline</small>
+            <small>Vs. grid-only baseline</small>
         </div>
     `;
 
-    // Populate ROI
-    const roi = premium.smart_recommendation;
+    // 9. RECOMMENDED INVESTMENT (RESTORED ROI BOX)
     const roiBox = document.getElementById('roi-box');
-    
     if (roi.best_capacity > 0) {
-        let paybackMsg = `<p style="margin-top: 0.5rem; font-size: 1.1rem;">Estimated ROI Payback: <strong style="color: var(--accent-color);">${(roi.payback_years || 0).toFixed(1)} years</strong></p>`;
-        if (!roi.is_payback_favorable) {
-            paybackMsg = `<p style="margin-top: 0.5rem; font-size: 1rem; color: var(--warning-color);">⚠️ Payback not favorable (>20 yrs)</p>`;
-        }
-
         roiBox.innerHTML = `
             <div class="recommendation-item" style="border-left-color: var(--accent-color);">
-                <strong>Optimal Battery Size: ${roi.best_capacity} kWh</strong>
+                <strong>Optimal Asset Size: ${roi.best_capacity} kWh</strong>
                 <p style="margin-top: 0.5rem; color: var(--text-secondary); font-size: 0.9rem;">
-                    Estimated System Capital Cost: <strong>$${(roi.estimated_system_cost || 0).toFixed(0)}</strong>
+                    Estimated Investment: <strong>$${(roi.estimated_system_cost || 0).toFixed(0)}</strong>
                 </p>
-                ${paybackMsg}
-                <div class="calculation-footer">* Includes $${assumptions.install_fee || 1500} installation + $${assumptions.battery_cost_per_kwh || 300}/kWh hardware.</div>
+                <p style="margin-top: 0.5rem; font-size: 1.1rem;">
+                    Projected Payback: <strong style="color: var(--accent-color);">${(roi.payback_years || 0).toFixed(1)} Years</strong>
+                </p>
+                <div class="calculation-footer">* Includes installation and hardware acquisition costs.</div>
             </div>
         `;
     } else {
-        roiBox.innerHTML = `<div class="recommendation-item"><strong>ROI Analysis:</strong> Grid-only setup is currently more favorable than battery storage based on your tariffs and demand profile.</div>`;
+        roiBox.innerHTML = `<div class="recommendation-item"><strong>ROI Analysis:</strong> Current demand-to-grid ratios favor maintaining your existing setup without further storage investment.</div>`;
     }
 
-    // Populate Hourly Deep Insights
+    // 10. ENGINEERING DETAILS (CHART + HOURLY)
+    renderChart(data.hourly, premium.key_moments);
     const hi = premium.hourly_insights;
     document.getElementById('hourly-insights-grid').innerHTML = `
         <div class="summary-card">
-            <span class="summary-label">Peak Grid Usage</span>
+            <span class="summary-label">Peak Cost Reliance</span>
             <span class="summary-val">${String(hi.max_grid_hour).padStart(2, '0')}:00</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Highest reliance hour</small>
+            <small>Highest grid demand hour</small>
         </div>
         <div class="summary-card">
-            <span class="summary-label">Best Charging Time</span>
+            <span class="summary-label">Best Charging Window</span>
             <span class="summary-val">${String(hi.peak_charging_hour).padStart(2, '0')}:00</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Max solar surplus</small>
+            <small>Maximum solar surplus</small>
         </div>
         <div class="summary-card" style="border-color: var(--warning-color);">
-            <span class="summary-label">Technical Solar Waste</span>
+            <span class="summary-label">Lost Savings Opportunity</span>
             <span class="summary-val" style="color: var(--warning-color);">${(hi.total_wasted_solar_kwh || 0).toFixed(1)} kWh/day</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Lost potential energy</small>
+            <small>Uncaptured solar energy</small>
         </div>
     `;
 
-    // Populate Scenarios
+    // 11. SCENARIO COMPARISON (RESTORED)
     const sc = premium.scenarios;
-    const optimalPayback = premium.smart_recommendation.payback_years;
-    const currentPayback = currentPaybackYears(s, assumptions); // Helper needed or use logic
-
     document.getElementById('scenarios-grid').innerHTML = `
         <div class="summary-card">
-            <span class="summary-label">${sc.baseline.name}</span>
-            <span class="summary-val">$${sc.baseline.daily_cost.toFixed(2)}</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Grid: 100% | Payback: N/A</small>
+            <span class="summary-label">Grid Only (Baseline)</span>
+            <span class="summary-val">$${sc.baseline.daily_cost.toFixed(2)}/day</span>
+            <small>ROI: N/A</small>
         </div>
         <div class="summary-card highlight-card">
-            <span class="summary-label">${sc.current.name}</span>
-            <span class="summary-val">$${sc.current.daily_cost.toFixed(2)}</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Grid: ${s.grid_dependency_percent.toFixed(0)}% | ROI: --</small>
+            <span class="summary-label">Current Configuration</span>
+            <span class="summary-val">$${sc.current.daily_cost.toFixed(2)}/day</span>
+            <small>Reliance: ${s.grid_dependency_percent.toFixed(0)}%</small>
         </div>
         <div class="summary-card" style="border-color: var(--success-color);">
-            <span class="summary-label">${sc.optimal.name}</span>
-            <span class="summary-val">$${sc.optimal.daily_cost.toFixed(2)}</span>
-            <small style="color:var(--text-secondary); font-size:0.75rem;">Size: ${premium.smart_recommendation.best_capacity}kWh | ROI: ${optimalPayback.toFixed(1)}y</small>
+            <span class="summary-label">Target Configuration</span>
+            <span class="summary-val">$${sc.optimal.daily_cost.toFixed(2)}/day</span>
+            <small>Payback: ${roi.payback_years.toFixed(1)}y</small>
         </div>
     `;
 
-    // 5. Add Scenario Reasoning
-    let scenarioReasoning = `<div style="margin-top: 1.5rem; padding: 1rem; background: rgba(88, 166, 255, 0.05); border-left: 3px solid var(--accent-color); border-radius: 4px;">
-        <strong style="display:block; margin-bottom: 0.5rem; color: var(--text-primary);">Why this recommendation?</strong>
-        <p style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.5;">`;
-    
-    if (premium.smart_recommendation.best_capacity > s.battery_throughput_kwh) {
-        scenarioReasoning += `The <strong>Recommended Setup</strong> increases your battery to <strong>${premium.smart_recommendation.best_capacity} kWh</strong>. This cuts your daily grid expense from $${sc.current.daily_cost.toFixed(2)} down to $${sc.optimal.daily_cost.toFixed(2)}, accelerating ROI. `;
-    } else if (premium.smart_recommendation.best_capacity === 0) {
-        scenarioReasoning += `The <strong>Baseline</strong> (Grid Only) is mathematically superior. Based on your current demand patterns and hardware costs, a battery system does not generate enough daily savings ($${(sc.baseline.daily_cost - sc.optimal.daily_cost).toFixed(2)}/day) to justify the capital expense. `;
+    // 12. AUDIT TRAIL (ASSUMPTIONS)
+    document.getElementById('assumptions-content').innerHTML = `
+        <div class="assumption-chip"><span>Region</span><span>${document.getElementById('country').value}</span></div>
+        <div class="assumption-chip"><span>Tariff Basis</span><span>$${assumptions.grid_price}/kWh</span></div>
+        <div class="assumption-chip"><span>Hardware Basis</span><span>$${assumptions.battery_cost_per_kwh}/kWh</span></div>
+        <div class="assumption-chip"><span>System Reserve</span><span>${(assumptions.battery_min_soc * 100).toFixed(0)}%</span></div>
+    `;
+
+    // 13. MODEL NOTES
+    const notesContainer = document.getElementById('model-notes-container');
+    if (data.model_notes && data.model_notes.length > 0) {
+        notesContainer.innerHTML = data.model_notes.map(n => `<div class="model-note-item">${n}</div>`).join('');
+        notesContainer.style.display = 'block';
     } else {
-        scenarioReasoning += `Your <strong>Current Setup</strong> is closely aligned with the optimal mathematical model. The recommended size of ${premium.smart_recommendation.best_capacity} kWh balances the hardware cost against the long-term grid savings, offering a return in ${optimalPayback.toFixed(1)} years. `;
+        notesContainer.style.display = 'none';
     }
 
-    if (s.weather_scenario === '3day_stress' || s.weather_scenario === 'rainy_week') {
-        scenarioReasoning += `Furthermore, during this <strong>stress-test</strong> simulation, a larger battery prevents critical depletion.`;
-    }
+    updatePremiumGate();
+}
 
-    scenarioReasoning += `</p></div>`;
-    
-    // Check if the container exists or create it
-    let reasonContainer = document.getElementById('scenario-reasons');
-    if (!reasonContainer) {
-        reasonContainer = document.createElement('div');
-        reasonContainer.id = 'scenario-reasons';
-        document.getElementById('scenarios-grid').after(reasonContainer);
-    }
-    reasonContainer.innerHTML = scenarioReasoning;
-
-    // Manage Lock State
-    const advancedContainer = document.getElementById('advanced-container');
-    const lockedOverlay = document.getElementById('locked-overlay');
-    
-    // If the user already paid/unlocked it. (For now, just tying unlock directly to Auth state for MVP gating)
-    if (currentUser) {
-        isUnlocked = true;
-    }
-
-    if (isUnlocked) {
-        advancedContainer.classList.remove('locked');
-        lockedOverlay.classList.remove('active');
-    } else {
-        advancedContainer.classList.add('locked');
-        lockedOverlay.classList.add('active');
-    }
+// Technical Details Toggle Logic
+const toggleBtn = document.getElementById('toggle-technical-btn');
+if (toggleBtn) {
+    toggleBtn.addEventListener('click', function() {
+        const details = document.getElementById('technical-details');
+        const isHidden = details.style.display === 'none';
+        details.style.display = isHidden ? 'block' : 'none';
+        this.innerHTML = isHidden ? 'Hide Engineering Data &uarr;' : 'View Detailed Engineering Data &darr;';
+    });
 }
 
 function renderChart(hourlyData, moments) {
@@ -648,7 +620,6 @@ const googleAuthBtn = document.getElementById('google-auth-btn');
 const tabBtns = document.querySelectorAll('.tab-btn');
 const authSubmitBtnText = document.getElementById('auth-btn-text');
 
-let authMode = 'signin'; // 'signin' or 'signup'
 
 function openAuthModal() {
     authModal.classList.add('active');
@@ -658,35 +629,159 @@ function closeAuthModal() {
     authModal.classList.remove('active');
 }
 
-function updateAuthStateUI() {
-    if (currentUser) {
-        authStateDiv.innerHTML = `
-            <div class="user-email">${currentUser.email}</div>
-            <button type="button" class="secondary auth-btn" id="header-signout-btn" style="padding: 0.5rem 1rem; font-size: 0.8rem;">Sign Out</button>
-        `;
-        document.getElementById('header-signout-btn').addEventListener('click', handleSignOut);
-        
-        // Auto-unlock features once logged in (Simulating the gate drop)
-        isUnlocked = true;
-        const advancedContainer = document.getElementById('advanced-container');
-        const lockedOverlay = document.getElementById('locked-overlay');
+function updatePremiumGate() {
+    // Premium logic: check both login status and the 'premium' flag from Firestore
+    const isLoggedIn = !!currentUser;
+    const isPremium = currentUser && currentUser.isPremium;
+    const isEmailVerified = currentUser && (currentUser.emailVerified || currentUser.providerData.some(p => p.providerId === 'google.com'));
+    
+    // The report is UNLOCKED if the user is authenticated, verified, AND a premium member
+    const isActuallyUnlocked = isLoggedIn && isEmailVerified && isPremium;
+    
+    const advancedContainer = document.getElementById('advanced-container');
+    const lockedOverlay = document.getElementById('locked-overlay');
+    const lockedMessage = document.querySelector('.locked-message');
+    
+    if (isActuallyUnlocked) {
         if (advancedContainer) advancedContainer.classList.remove('locked');
         if (lockedOverlay) lockedOverlay.classList.remove('active');
     } else {
-        authStateDiv.innerHTML = `<button type="button" class="secondary auth-btn" id="header-signin-btn">Sign In</button>`;
-        document.getElementById('header-signin-btn').addEventListener('click', openAuthModal);
-        
-        isUnlocked = false;
-        const advancedContainer = document.getElementById('advanced-container');
-        const lockedOverlay = document.getElementById('locked-overlay');
         if (advancedContainer) advancedContainer.classList.add('locked');
         if (lockedOverlay) lockedOverlay.classList.add('active');
+        
+        // Update message based on login state
+        const unlockBtn = document.getElementById('unlock-btn');
+        const upgradeBtn = document.getElementById('upgrade-premium-btn');
+        
+        if (!isLoggedIn) {
+            lockedMessage.innerText = "Unlock full professional analysis: seasonal forecasting, price sensitivity, and optimized ROI mapping.";
+            if (unlockBtn) unlockBtn.style.display = 'flex';
+            if (upgradeBtn) upgradeBtn.style.display = 'none';
+        } else if (!isEmailVerified) {
+            lockedMessage.innerHTML = `Please verify your email to continue. <br><button id="resend-verification-btn" class="secondary" style="margin-top: 1rem; padding: 0.5rem 1rem; font-size: 0.8rem;">Resend Verification Email</button>`;
+            if (unlockBtn) unlockBtn.style.display = 'none';
+            if (upgradeBtn) upgradeBtn.style.display = 'none';
+            
+            // Add resend logic
+            setTimeout(() => {
+                const resendBtn = document.getElementById('resend-verification-btn');
+                if (resendBtn) {
+                    resendBtn.addEventListener('click', async () => {
+                        try {
+                            await sendEmailVerification(currentUser);
+                            alert("Verification email sent! Please check your inbox and refresh this page once verified.");
+                        } catch (err) {
+                            alert("Error sending verification: " + err.message);
+                        }
+                    });
+                }
+            }, 0);
+        } else if (!isPremium) {
+            lockedMessage.innerHTML = `
+                Your account is active. Upgrade to Premium to unlock seasonal forecasting and ROI optimization.<br>
+                <button id="upgrade-premium-btn" class="primary" style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem; justify-content: center; width: 100%;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    Upgrade to Premium
+                </button>
+                <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem;">
+                    <p style="font-size: 0.8rem; color: var(--text-secondary);">Already paid but still locked?</p>
+                    <button id="confirm-purchase-btn" class="secondary" style="margin-top: 0.5rem; padding: 0.5rem 1rem; font-size: 0.8rem; width: 100%;">Confirm My Purchase</button>
+                </div>
+            `;
+            if (unlockBtn) unlockBtn.style.display = 'none';
+            
+            // Add listeners after innerHTML update
+            setTimeout(() => {
+                const upBtn = document.getElementById('upgrade-premium-btn');
+                if (upBtn) upBtn.addEventListener('click', handleUpgradeClick);
+                
+                const confBtn = document.getElementById('confirm-purchase-btn');
+                if (confBtn) confBtn.addEventListener('click', async () => {
+                    confBtn.disabled = true;
+                    confBtn.textContent = "Checking...";
+                    try {
+                        const res = await fetch(`${API_BASE_URL}/api/user/status/${currentUser.email}`);
+                        const data = await res.json();
+                        if (data.premium) {
+                            alert("Purchase confirmed! Unlocking features now.");
+                            window.location.reload();
+                        } else {
+                            alert("We couldn't confirm your purchase yet. If you just paid, please wait a minute for the email confirmation and try again.");
+                        }
+                    } catch (err) {
+                        alert("Error checking purchase: " + err.message);
+                    } finally {
+                        confBtn.disabled = false;
+                        confBtn.textContent = "Confirm My Purchase";
+                    }
+                });
+            }, 0);
+        }
     }
 }
 
-function handleAuthSuccess(user) {
+function updateAuthStateUI() {
+    if (currentUser) {
+        let premiumBadge = '';
+        if (currentUser.isPremium) {
+            const expiryStr = currentUser.premiumUntil ? currentUser.premiumUntil.toLocaleDateString() : 'Active';
+            premiumBadge = `<span class="premium-badge" title="Expires: ${expiryStr}">Premium</span>`;
+        }
+        
+        authStateDiv.innerHTML = `
+            <div class="user-info">
+                ${premiumBadge}
+                <div class="user-email">${currentUser.email}</div>
+            </div>
+            <button type="button" class="secondary auth-btn" id="header-signout-btn" style="padding: 0.5rem 1rem; font-size: 0.8rem;">Sign Out</button>
+        `;
+        document.getElementById('header-signout-btn').addEventListener('click', handleSignOut);
+    } else {
+        authStateDiv.innerHTML = `<button type="button" class="secondary auth-btn" id="header-signin-btn">Sign In</button>`;
+        document.getElementById('header-signin-btn').addEventListener('click', openAuthModal);
+    }
+    updatePremiumGate();
+}
+
+let unsubUser = null;
+
+async function handleAuthSuccess(user) {
     currentUser = user;
     closeAuthModal();
+    
+    // Sync with Firestore
+    const userRef = doc(db, "users", user.uid);
+    
+    // Set basic info if it's a new user (don't overwrite premium status)
+    await setDoc(userRef, {
+        email: user.email,
+        lastLogin: new Date().toISOString()
+    }, { merge: true });
+
+    // Listen for real-time changes (e.g. from Gumroad Webhook)
+    if (unsubUser) unsubUser();
+    unsubUser = onSnapshot(userRef, (doc) => {
+        if (doc.exists()) {
+            const userData = doc.data();
+            const now = new Date();
+            let isPremium = userData.premium === true;
+            
+            // Check for monthly expiry
+            if (userData.premiumUntil) {
+                const expiryDate = userData.premiumUntil.toDate();
+                if (expiryDate < now) {
+                    isPremium = false;
+                    console.log("Premium subscription expired.");
+                } else {
+                    currentUser.premiumUntil = expiryDate;
+                }
+            }
+            
+            currentUser.isPremium = isPremium;
+            updatePremiumGate();
+        }
+    });
+
     updateAuthStateUI();
 }
 
@@ -741,7 +836,11 @@ authForm.addEventListener('submit', (e) => {
 
     if (authMode === 'signup') {
         createUserWithEmailAndPassword(auth, email, password)
-            .then((userCredential) => {
+            .then(async (userCredential) => {
+                // Send verification email immediately
+                await sendEmailVerification(userCredential.user);
+                alert("Account created! A verification email has been sent. Please verify your email before upgrading to Premium.");
+                
                 handleAuthSuccess(userCredential.user);
                 authSubmitBtnText.textContent = originalBtnText;
                 authForm.reset();
@@ -784,6 +883,69 @@ googleAuthBtn.addEventListener('click', () => {
 document.getElementById('download-report-btn').addEventListener('click', () => {
     window.print();
 });
+
+function handleUpgradeClick() {
+    const gumroadUrl = "https://hassansalum.gumroad.com/l/ogoyv";
+    const email = currentUser ? currentUser.email : "";
+    const uid = currentUser ? currentUser.uid : "";
+    
+    alert("After completing your payment, please return to this tab. Your account will automatically unlock within a few seconds of payment confirmation!");
+    
+    // Open in a new tab so they don't lose their place in Synex
+    window.open(`${gumroadUrl}?email=${encodeURIComponent(email)}&user_id=${encodeURIComponent(uid)}`, '_blank');
+}
+
+// Gumroad Upgrade Logic
+const upgradePremiumBtn = document.getElementById('upgrade-premium-btn');
+if (upgradePremiumBtn) {
+    upgradePremiumBtn.addEventListener('click', handleUpgradeClick);
+}
+
+// Handle Payment Success Return
+async function pollForPremiumStatus(userIdOrEmail) {
+    const statusUrl = `${API_BASE_URL}/api/user/status/${userIdOrEmail}`;
+    let attempts = 0;
+    const maxAttempts = 12; // Poll for 1 minute (5s intervals)
+    
+    const interval = setInterval(async () => {
+        attempts++;
+        try {
+            const res = await fetch(statusUrl);
+            const data = await res.json();
+            
+            if (data.premium) {
+                clearInterval(interval);
+                alert("Payment Confirmed! Your account is now Premium. The page will refresh to unlock features.");
+                window.location.reload();
+            }
+        } catch (e) {
+            console.error("Polling error:", e);
+        }
+        
+        if (attempts >= maxAttempts) {
+            clearInterval(interval);
+            console.log("Polling stopped after max attempts.");
+        }
+    }, 5000);
+}
+
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('payment') === 'success') {
+    // If we have a success redirect, prioritize polling to show immediate feedback
+    alert("Payment received! We are confirming your premium status. This usually takes 5-10 seconds...");
+    
+    // Check if we can identify the user to poll for
+    if (currentUser) {
+        pollForPremiumStatus(currentUser.uid);
+    } else {
+        // Fallback: search by email if provided in URL or if they just signed up
+        const email = urlParams.get('email');
+        if (email) pollForPremiumStatus(email);
+    }
+    
+    // Clean up the URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+}
 
 // Explanation Modal Close
 document.getElementById('close-explanation-btn').addEventListener('click', () => {
