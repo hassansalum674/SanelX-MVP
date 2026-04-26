@@ -41,7 +41,17 @@ const API_BASE_URL = window.SYNEX_CONFIG?.API_URL?.replace('/analyze', '') || 'h
 const ANALYZE_URL = `${API_BASE_URL}/analyze`;
 let currentUser = null;
 let energyChartInstance = null;
-let authMode = 'signin'; // 'signin' or 'signup'
+let authMode = 'signin'; 
+let userSettings = { currency: 'USD', theme: 'dark', solar_cost_preset: 1200, battery_cost_preset: 450 };
+
+// --- UI Elements ---
+const sidebar = document.getElementById('app-sidebar');
+const navAnalyzer = document.getElementById('nav-analyzer');
+const navSettings = document.getElementById('nav-settings');
+const navAccount = document.getElementById('nav-account');
+const settingsModal = document.getElementById('settings-modal');
+const closeSettingsBtn = document.getElementById('close-settings-btn');
+const saveSettingsBtn = document.getElementById('save-settings-btn');
 
 const SAMPLE_DATA = {
     "solar_kw": 5.0,
@@ -155,11 +165,80 @@ allInputIds.forEach(id => {
     if (el) el.addEventListener('change', saveFormState);
 });
 
+// --- Dashboard Navigation & Settings ---
+
+function toggleNav(activeId) {
+    [navAnalyzer, navSettings, navAccount].forEach(btn => {
+        if (btn) btn.classList.remove('active');
+    });
+    const activeBtn = document.getElementById(activeId);
+    if (activeBtn) activeBtn.classList.add('active');
+}
+
+if (navAnalyzer) navAnalyzer.addEventListener('click', (e) => { e.preventDefault(); toggleNav('nav-analyzer'); });
+if (navSettings) navSettings.addEventListener('click', (e) => { 
+    e.preventDefault(); 
+    settingsModal.classList.add('active');
+    loadSettingsIntoModal();
+});
+if (navAccount) navAccount.addEventListener('click', (e) => { 
+    e.preventDefault(); 
+    if (!currentUser) openAuthModal();
+    else toggleNav('nav-account');
+});
+
+if (closeSettingsBtn) closeSettingsBtn.addEventListener('click', () => settingsModal.classList.remove('active'));
+if (saveSettingsBtn) saveSettingsBtn.addEventListener('click', saveSettingsFromModal);
+
+async function loadSettingsIntoModal() {
+    if (currentUser) {
+        try {
+            const res = await fetch(`${API_BASE_URL}/api/user/settings/${currentUser.uid}`);
+            if (res.ok) {
+                userSettings = await res.json();
+            }
+        } catch (e) { console.error("Error loading settings", e); }
+    }
+    
+    document.getElementById('setting-currency').value = userSettings.currency;
+    document.getElementById('setting-solar-cost').value = userSettings.solar_cost_preset || 1200;
+    document.getElementById('setting-battery-cost').value = userSettings.battery_cost_preset || 450;
+}
+
+async function saveSettingsFromModal() {
+    userSettings.currency = document.getElementById('setting-currency').value;
+    userSettings.solar_cost_preset = parseFloat(document.getElementById('setting-solar-cost').value);
+    userSettings.battery_cost_preset = parseFloat(document.getElementById('setting-battery-cost').value);
+    
+    // Update UI immediately
+    updateCurrencySymbols();
+    
+    if (currentUser) {
+        try {
+            await fetch(`${API_BASE_URL}/api/user/settings/${currentUser.uid}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userSettings)
+            });
+        } catch (e) { console.error("Error saving settings", e); }
+    }
+    
+    settingsModal.classList.remove('active');
+    alert("Settings saved successfully!");
+}
+
+function updateCurrencySymbols() {
+    const symbols = { 'USD': '$', 'TZS': 'Tsh', 'KES': 'Ksh', 'NGN': '₦', 'EUR': '€' };
+    const symbol = symbols[userSettings.currency] || '$';
+    document.querySelectorAll('.currency-symbol').forEach(el => el.innerText = symbol);
+}
+
 // Initial load
 document.addEventListener('DOMContentLoaded', () => {
     loadFormState();
     updateProfiles();
     updateAuthStateUI();
+    updateCurrencySymbols();
 });
 
 // All inputs that should trigger stale state
@@ -264,39 +343,29 @@ document.getElementById('load-sample-btn').addEventListener('click', () => {
 document.getElementById('analyze-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     
-    const submitBtn = document.getElementById('submit-btn');
-    const loader = document.getElementById('loader');
-    const btnText = document.getElementById('btn-text');
-    const errorMsg = document.getElementById('error-message');
-    const resultsSection = document.getElementById('results-section');
+    const submitBtn = document.getElementById('analyze-btn');
+    const loader = document.getElementById('analyze-loader');
+    const resultsArea = document.getElementById('results-area');
 
     // UI State: Loading
     submitBtn.disabled = true;
-    loader.style.display = 'block';
-    btnText.textContent = 'Analyzing...';
-    errorMsg.style.display = 'none';
+    if (loader) loader.style.display = 'inline-block';
     
     try {
         const payload = {
             solar_kw: parseFloat(document.getElementById('solar_kw').value),
             battery_kwh: parseFloat(document.getElementById('battery_kwh').value),
-            initial_battery_kwh: parseFloat(document.getElementById('initial_battery_kwh').value),
-            grid_price: parseFloat(document.getElementById('grid_price').value),
-            weather_scenario: document.getElementById('weather_scenario').value,
+            initial_battery_kwh: parseFloat(document.getElementById('battery_initial').value),
+            grid_price: parseFloat(document.getElementById('grid-price').value),
             cost_params: {
-                solar_cost_kw: parseFloat(document.getElementById('solar_cost_kw').value),
-                battery_cost_kwh: parseFloat(document.getElementById('battery_cost_kwh').value),
-                install_fee: parseFloat(document.getElementById('install_fee').value),
-                maint_pct: parseFloat(document.getElementById('maint_pct').value)
+                solar_cost_kw: userSettings.solar_cost_preset || 1200,
+                battery_cost_kwh: userSettings.battery_cost_preset || 450,
+                install_fee: 1000,
+                maint_pct: 0.01
             },
-            hourly_demand: parseCommaList(document.getElementById('hourly_demand').value),
-            hourly_solar_profile: parseCommaList(document.getElementById('hourly_solar_profile').value)
+            hourly_demand: parseCommaList(document.getElementById('hourly-demand').value),
+            hourly_solar_profile: generateSolarArray(document.getElementById('climate').value)
         };
-
-        // Validation
-        if (payload.hourly_demand.length !== 24 || payload.hourly_solar_profile.length !== 24) {
-            throw new Error('Both hourly profiles must contain exactly 24 values.');
-        }
 
         const response = await fetch(ANALYZE_URL, {
             method: 'POST',
@@ -304,24 +373,18 @@ document.getElementById('analyze-form').addEventListener('submit', async (e) => 
             body: JSON.stringify(payload)
         });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || `Server returned ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Server returned ${response.status}`);
 
         const data = await response.json();
         renderResults(data);
-        resultsSection.style.display = 'block';
-        resultsSection.classList.remove('stale'); // Reset stale state on success
-        resultsSection.scrollIntoView({ behavior: 'smooth' });
+        resultsArea.style.display = 'block';
+        resultsArea.scrollIntoView({ behavior: 'smooth' });
 
     } catch (err) {
-        errorMsg.textContent = err.message;
-        errorMsg.style.display = 'block';
+        alert("Analysis failed: " + err.message);
     } finally {
         submitBtn.disabled = false;
-        loader.style.display = 'none';
-        btnText.textContent = 'Analyze System';
+        if (loader) loader.style.display = 'none';
     }
 });
 
@@ -701,51 +764,55 @@ function closeAuthModal() {
 }
 
 function updatePremiumGate() {
-    // MVP Logic: Check if premium is unlocked in localStorage
     const mvpPremiumEmail = localStorage.getItem('synex_premium_email');
-    const isActuallyUnlocked = !!mvpPremiumEmail;
+    const isActuallyUnlocked = !!mvpPremiumEmail || (currentUser && currentUser.isPremium);
     
-    const advancedContainer = document.getElementById('advanced-container');
-    const lockedOverlay = document.getElementById('locked-overlay');
-    const lockedMessage = document.querySelector('.locked-message');
-    
-    if (isActuallyUnlocked) {
-        if (advancedContainer) advancedContainer.classList.remove('locked');
-        if (lockedOverlay) lockedOverlay.classList.remove('active');
-    } else {
-        if (advancedContainer) advancedContainer.classList.add('locked');
-        if (lockedOverlay) lockedOverlay.classList.add('active');
+    const resultsArea = document.getElementById('results-area');
+    if (!resultsArea || resultsArea.style.display === 'none') return;
+
+    if (!isActuallyUnlocked) {
+        // Find or create the gate overlay inside the results area
+        let gate = document.getElementById('premium-gate-overlay');
+        if (!gate) {
+            gate = document.createElement('div');
+            gate.id = 'premium-gate-overlay';
+            gate.className = 'premium-gate-overlay active';
+            resultsArea.appendChild(gate);
+        }
         
-        // MVP Email Capture UI
-        lockedMessage.innerHTML = `
-            <div class="mvp-unlock-container" style="text-align: center; padding: 1.5rem; background: rgba(13, 17, 23, 0.9); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); max-width: 400px; margin: 0 auto;">
-                <h3 style="margin-bottom: 1rem; color: #fff; font-size: 1.25rem;">Unlock Premium Insights</h3>
-                <p style="margin-bottom: 1.5rem; font-size: 0.9rem; color: #8b949e; line-height: 1.5;">
-                    Enter your email to instantly unlock seasonal forecasting, ROI optimization, and professional engineering data.
+        gate.innerHTML = `
+            <div class="mvp-unlock-container glass-card" style="text-align: center; padding: 2.5rem; max-width: 450px; margin: 4rem auto; position: relative; z-index: 10;">
+                <i class="fas fa-lock" style="font-size: 2rem; color: var(--accent-color); margin-bottom: 1rem;"></i>
+                <h3 style="margin-bottom: 1rem; color: #fff; font-size: 1.5rem;">Unlock Advanced Insights</h3>
+                <p style="margin-bottom: 2rem; font-size: 1rem; color: var(--text-secondary); line-height: 1.6;">
+                    Unlock seasonal forecasting, ROI optimization, and professional engineering data to make the best energy decision.
                 </p>
-                <form id="mvp-unlock-form" style="display: flex; flex-direction: column; gap: 0.75rem;">
-                    <input type="email" id="mvp-email-input" placeholder="your@email.com" required 
-                           style="padding: 0.75rem; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #fff; width: 100%; font-size: 1rem;">
-                    <button type="submit" class="primary" style="padding: 0.75rem; width: 100%; display: flex; align-items: center; gap: 0.5rem; justify-content: center; font-size: 1rem; font-weight: 600;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                        Unlock Now
+                <form id="mvp-unlock-form" style="display: flex; flex-direction: column; gap: 1rem;">
+                    <input type="email" id="mvp-email-input" placeholder="Enter your email" required 
+                           style="padding: 1rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.3); color: #fff; width: 100%; font-size: 1rem;">
+                    <button type="submit" class="primary" style="padding: 1rem; width: 100%; font-weight: 700; border-radius: 8px;">
+                        Unlock Insights Now
                     </button>
                 </form>
+                <div class="mt-2" style="font-size: 0.85rem; color: var(--text-secondary);">
+                    Existing premium user? <a href="#" onclick="openAuthModal(); return false;" style="color: var(--accent-color);">Sign In</a>
+                </div>
             </div>
         `;
         
+        resultsArea.classList.add('locked-blur');
+
         const unlockForm = document.getElementById('mvp-unlock-form');
         if (unlockForm) {
             unlockForm.addEventListener('submit', (e) => {
                 e.preventDefault();
-                const email = document.getElementById('mvp-email-input').value;
-                if (!validateEmail(email)) {
-                    alert("Please enter a valid email address.");
-                    return;
-                }
-                handleMvpUnlock(email);
+                handleMvpUnlock(document.getElementById('mvp-email-input').value);
             });
         }
+    } else {
+        const gate = document.getElementById('premium-gate-overlay');
+        if (gate) gate.remove();
+        resultsArea.classList.remove('locked-blur');
     }
 }
 
@@ -786,24 +853,34 @@ async function handleMvpUnlock(email) {
 }
 
 function updateAuthStateUI() {
+    const userProfileNav = document.getElementById('user-profile-nav');
+    const userEmailDisplay = document.getElementById('user-email-display');
+    const authBtnNav = document.getElementById('auth-btn-nav');
+    const authBtnTextNav = document.getElementById('auth-btn-text-nav');
+    const premiumBadge = document.getElementById('premium-badge');
+
     if (currentUser) {
-        let premiumBadge = '';
-        if (currentUser.isPremium) {
-            const expiryStr = currentUser.premiumUntil ? currentUser.premiumUntil.toLocaleDateString() : 'Active';
-            premiumBadge = `<span class="premium-badge" title="Expires: ${expiryStr}">Premium</span>`;
+        if (userProfileNav) userProfileNav.style.display = 'block';
+        if (userEmailDisplay) userEmailDisplay.innerText = currentUser.email;
+        if (authBtnTextNav) authBtnTextNav.innerText = 'Sign Out';
+        if (authBtnNav) {
+            authBtnNav.onclick = (e) => { e.preventDefault(); handleSignOut(); };
+            authBtnNav.querySelector('i').className = 'fas fa-sign-out-alt';
         }
         
-        authStateDiv.innerHTML = `
-            <div class="user-info">
-                ${premiumBadge}
-                <div class="user-email">${currentUser.email}</div>
-            </div>
-            <button type="button" class="secondary auth-btn" id="header-signout-btn" style="padding: 0.5rem 1rem; font-size: 0.8rem;">Sign Out</button>
-        `;
-        document.getElementById('header-signout-btn').addEventListener('click', handleSignOut);
+        if (currentUser.isPremium) {
+            if (premiumBadge) premiumBadge.style.display = 'flex';
+        } else {
+            if (premiumBadge) premiumBadge.style.display = 'none';
+        }
     } else {
-        authStateDiv.innerHTML = `<button type="button" class="secondary auth-btn" id="header-signin-btn">Sign In</button>`;
-        document.getElementById('header-signin-btn').addEventListener('click', openAuthModal);
+        if (userProfileNav) userProfileNav.style.display = 'none';
+        if (authBtnTextNav) authBtnTextNav.innerText = 'Sign In';
+        if (authBtnNav) {
+            authBtnNav.onclick = (e) => { e.preventDefault(); openAuthModal(); };
+            authBtnNav.querySelector('i').className = 'fas fa-sign-in-alt';
+        }
+        if (premiumBadge) premiumBadge.style.display = 'none';
     }
     updatePremiumGate();
 }
@@ -949,54 +1026,10 @@ document.getElementById('download-report-btn').addEventListener('click', () => {
     window.print();
 });
 
-function handleUpgradeClick() {
-    const gumroadUrl = "https://hassansalum.gumroad.com/l/ogoyv";
-    const email = currentUser ? currentUser.email : "";
-    const uid = currentUser ? currentUser.uid : "";
-    
-    // Save current form state so it's not lost on redirect/refresh
-    saveFormState();
-    
-    // Inform the user of the flow with more detail
-    alert("IMPORTANT: After paying on Gumroad, check your email for a receipt. Your premium status will unlock automatically in this tab within seconds. Do NOT close this tab!");
-    
-    // Open in a new tab so they don't lose their place in Synex
-    window.open(`${gumroadUrl}?email=${encodeURIComponent(email)}&user_id=${encodeURIComponent(uid)}`, '_blank');
-}
-
-// Gumroad Upgrade Logic
-const upgradePremiumBtn = document.getElementById('upgrade-premium-btn');
-if (upgradePremiumBtn) {
-    upgradePremiumBtn.addEventListener('click', handleUpgradeClick);
-}
+// Upgrade logic removed.
 
 // Handle Payment Success Return
-async function pollForPremiumStatus(userIdOrEmail) {
-    const statusUrl = `${API_BASE_URL}/api/user/status/${userIdOrEmail}`;
-    let attempts = 0;
-    const maxAttempts = 12; // Poll for 1 minute (5s intervals)
-    
-    const interval = setInterval(async () => {
-        attempts++;
-        try {
-            const res = await fetch(statusUrl);
-            const data = await res.json();
-            
-            if (data.premium) {
-                clearInterval(interval);
-                alert("Payment Confirmed! Your account is now Premium. The page will refresh to unlock features.");
-                window.location.reload();
-            }
-        } catch (e) {
-            console.error("Polling error:", e);
-        }
-        
-        if (attempts >= maxAttempts) {
-            clearInterval(interval);
-            console.log("Polling stopped after max attempts.");
-        }
-    }, 5000);
-}
+// Polling logic removed.
 
 const urlParams = new URLSearchParams(window.location.search);
 if (urlParams.get('payment') === 'success') {

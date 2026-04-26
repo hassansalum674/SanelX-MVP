@@ -1,8 +1,5 @@
 import os
 import uvicorn
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,8 +9,6 @@ from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 
 from engine.core import run_synex_simulation
-import hmac
-import hashlib
 import json
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -56,8 +51,7 @@ app = FastAPI(
 )
 
 # CORS Configuration
-# Standardizing on ALLOWED_ORIGINS as per Cloud Run deployment requirements
-env_origins = os.getenv("ALLOWED_ORIGINS", os.getenv("CORS_ORIGINS", "http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000"))
+env_origins = os.getenv("ALLOWED_ORIGINS", "https://synex.sanelx.com,https://synex-frontend.onrender.com,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8000")
 origins = [o.strip() for o in env_origins.split(",") if o.strip()]
 
 app.add_middleware(
@@ -92,6 +86,13 @@ class CostParams(BaseModel):
     battery_cost_kwh: float
     install_fee: float
     maint_pct: float
+
+class UserSettings(BaseModel):
+    model_config = ConfigDict(extra='ignore')
+    currency: Optional[str] = "USD"
+    theme: Optional[str] = "dark"
+    solar_cost_preset: Optional[float] = None
+    battery_cost_preset: Optional[float] = None
 
 class AnalyzeRequest(BaseModel):
     model_config = ConfigDict(extra='ignore')
@@ -128,171 +129,28 @@ async def analyze(request: AnalyzeRequest):
         # Caught by global handler but providing specific HTTP exception here for clarity
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- Email Helper ---
-def send_premium_confirmation_email(user_email: str, user_id: str):
-    """
-    Sends a confirmation email to the user when they upgrade to premium.
-    """
-    smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", 587))
-    smtp_user = os.getenv("SMTP_USER")
-    smtp_password = os.getenv("SMTP_PASSWORD")
-    sender_email = os.getenv("SENDER_EMAIL", smtp_user)
-
-    if not all([smtp_user, smtp_password]):
-        print("DEBUG: SMTP credentials missing, skipping email.")
-        return False
-
+@app.get("/api/user/settings/{user_id}")
+async def get_settings(user_id: str):
+    """Fetches user preferences from Firestore."""
     try:
-        msg = MIMEMultipart()
-        msg['From'] = sender_email
-        msg['To'] = user_email
-        msg['Subject'] = "Welcome to Synex Premium!"
-
-        body = f"""
-        Hello,
-
-        Thank you for your purchase! Your Synex account has been upgraded to Premium.
-
-        Account Details:
-        - Email: {user_email}
-        - User ID: {user_id}
-
-        You can now access professional energy insights, seasonal forecasting, and ROI mapping.
-
-        Login here: {os.getenv('FRONTEND_URL', 'https://synex.sanelx.com')}
-
-        Best regards,
-        The Synex Team
-        """
-        msg.attach(MIMEText(body, 'plain'))
-
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(smtp_user, smtp_password)
-            server.send_message(msg)
-        
-        print(f"DEBUG: Confirmation email sent to {user_email}")
-        return True
+        user_ref = db.collection('users').document(user_id)
+        doc = user_ref.get()
+        if doc.exists():
+            data = doc.to_dict()
+            return data.get('settings', {"currency": "USD", "theme": "dark"})
+        return {"currency": "USD", "theme": "dark"}
     except Exception as e:
-        print(f"DEBUG: Failed to send email: {str(e)}")
-        return False
+        raise HTTPException(status_code=500, detail=str(e))
 
-# --- Gumroad Webhook Integration ---
-
-@app.post("/api/gumroad/webhook")
-async def gumroad_webhook(request: Request):
-    """
-    Receives Gumroad sale notifications and unlocks premium status for users.
-    """
-    # 1. Get raw body for signature verification
-    payload_body = await request.body()
-    
-    # 2. Verify Signature
-    signature = request.headers.get('x-gumroad-signature')
-    secret = os.getenv("GUMROAD_WEBHOOK_SECRET")
-    
-    if secret and signature:
-        expected_sig = hmac.new(
-            key=secret.encode('utf-8'),
-            msg=payload_body,
-            digestmod=hashlib.sha256
-        ).hexdigest()
-        
-        if not hmac.compare_digest(expected_sig, signature):
-            print("DEBUG: Gumroad Webhook Invalid Signature")
-            raise HTTPException(status_code=403, detail="Invalid signature")
-
-    # 3. Parse Data
+@app.post("/api/user/settings/{user_id}")
+async def save_settings(user_id: str, settings: UserSettings):
+    """Saves user preferences to Firestore."""
     try:
-        # Try JSON first
-        data = await request.json()
-    except Exception:
-        # Fallback to Form Data
-        form_data = await request.form()
-        data = dict(form_data)
-
-    event = data.get('event')
-    user_id = data.get('user_id') or data.get('custom_fields', {}).get('user_id')
-    email = data.get('email') or data.get('buyer_email')
-    product_name = data.get('product_name')
-    sale_id = data.get('sale_id')
-    seller_id = data.get('seller_id')
-    
-    print(f"DEBUG: Gumroad Webhook Received. Event: {event}, Email: {email}, UID: {user_id}, Seller: {seller_id}")
-
-    # 4. Filter for successful sales and specific product
-    if event in ['sale', 'ping']:
-        # Security Check: Seller ID
-        expected_seller_id = os.getenv("GUMROAD_SELLER_ID")
-        if expected_seller_id and seller_id != expected_seller_id:
-            print(f"DEBUG: Seller ID Mismatch. Got: {seller_id}, Expected: {expected_seller_id}")
-            raise HTTPException(status_code=403, detail="Unauthorized Seller ID")
-
-        # Validate Product Name
-        if product_name != "Synex Premium Access" and event != 'ping':
-            print(f"DEBUG: Ignoring product: {product_name}")
-            return {"status": "ignored_product", "product": product_name}
-
-        if user_id or email:
-            try:
-                # 1. Update by User ID
-                if user_id:
-                    user_ref = db.collection('users').document(user_id)
-                    doc_snap = user_ref.get()
-                    
-                    if doc_snap.exists:
-                        if doc_snap.to_dict().get('last_sale_id') == sale_id:
-                            return {"status": "success", "message": "Already processed."}
-                    
-                    now = datetime.now(timezone.utc)
-                    expiry = now + timedelta(days=30)
-
-                    user_ref.set({
-                        "premium": True,
-                        "plan": "premium",
-                        "premiumSince": now,
-                        "premiumUntil": expiry,
-                        "last_sale_id": sale_id,
-                        "email": email or doc_snap.to_dict().get('email')
-                    }, merge=True)
-                    
-                    if email:
-                        send_premium_confirmation_email(email, user_id)
-                    return {"status": "success", "message": f"User {user_id} upgraded."}
-                
-                # 2. Update by Email Fallback
-                elif email:
-                    users_ref = db.collection('users')
-                    query = users_ref.where('email', '==', email).limit(1).get()
-                    
-                    if query:
-                        user_doc = query[0]
-                        if user_doc.to_dict().get('last_sale_id') == sale_id:
-                            return {"status": "success", "message": "Already processed."}
-
-                        now = datetime.now(timezone.utc)
-                        expiry = now + timedelta(days=30)
-
-                        user_doc.reference.update({
-                            "premium": True,
-                            "plan": "premium",
-                            "premiumSince": now,
-                            "premiumUntil": expiry,
-                            "last_sale_id": sale_id
-                        })
-                        
-                        send_premium_confirmation_email(email, user_doc.id)
-                        return {"status": "success", "message": f"User {email} upgraded via fallback."}
-                    else:
-                        print(f"DEBUG: Webhook - User {email} not found in database.")
-                        return {"status": "pending_user_creation", "email": email}
-                    
-            except Exception as e:
-                print(f"DEBUG: Database Error during webhook: {str(e)}")
-                raise HTTPException(status_code=500, detail="Database update failed")
-    
-    return {"status": "ignored", "event": event}
+        user_ref = db.collection('users').document(user_id)
+        user_ref.set({"settings": settings.model_dump()}, merge=True)
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/analytics/unlock")
 async def log_unlock(request: Request):
