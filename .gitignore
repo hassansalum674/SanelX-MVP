@@ -23,3 +23,4 @@ Thumbs.db
 test_response.json
 test_response_*.json
 service-account.json
+firebase-service-account.json
