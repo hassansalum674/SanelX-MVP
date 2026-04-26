@@ -578,6 +578,7 @@ function renderResults(data) {
         notesContainer.style.display = 'none';
     }
 
+    // MANDATORY: Update the gate to show the email capture form if not unlocked
     updatePremiumGate();
 }
 
@@ -700,13 +701,9 @@ function closeAuthModal() {
 }
 
 function updatePremiumGate() {
-    // Premium logic: check both login status and the 'premium' flag from Firestore
-    const isLoggedIn = !!currentUser;
-    const isPremium = currentUser && currentUser.isPremium;
-    const isEmailVerified = currentUser && (currentUser.emailVerified || currentUser.providerData.some(p => p.providerId === 'google.com'));
-    
-    // The report is UNLOCKED if the user is authenticated, verified, AND a premium member
-    const isActuallyUnlocked = isLoggedIn && isEmailVerified && isPremium;
+    // MVP Logic: Check if premium is unlocked in localStorage
+    const mvpPremiumEmail = localStorage.getItem('synex_premium_email');
+    const isActuallyUnlocked = !!mvpPremiumEmail;
     
     const advancedContainer = document.getElementById('advanced-container');
     const lockedOverlay = document.getElementById('locked-overlay');
@@ -719,81 +716,72 @@ function updatePremiumGate() {
         if (advancedContainer) advancedContainer.classList.add('locked');
         if (lockedOverlay) lockedOverlay.classList.add('active');
         
-        // Update message based on login state
-        const unlockBtn = document.getElementById('unlock-btn');
-        const upgradeBtn = document.getElementById('upgrade-premium-btn');
-        
-        if (!isLoggedIn) {
-            lockedMessage.innerText = "Unlock full professional analysis: seasonal forecasting, price sensitivity, and optimized ROI mapping.";
-            if (unlockBtn) unlockBtn.style.display = 'flex';
-            if (upgradeBtn) upgradeBtn.style.display = 'none';
-        } else if (!isEmailVerified) {
-            lockedMessage.innerHTML = `Please verify your email to continue. <br><button id="resend-verification-btn" class="secondary" style="margin-top: 1rem; padding: 0.5rem 1rem; font-size: 0.8rem;">Resend Verification Email</button>`;
-            if (unlockBtn) unlockBtn.style.display = 'none';
-            if (upgradeBtn) upgradeBtn.style.display = 'none';
-            
-            // Add resend logic
-            setTimeout(() => {
-                const resendBtn = document.getElementById('resend-verification-btn');
-                if (resendBtn) {
-                    resendBtn.addEventListener('click', async () => {
-                        try {
-                            await sendEmailVerification(currentUser);
-                            alert("Verification email sent! Please check your inbox and refresh this page once verified.");
-                        } catch (err) {
-                            alert("Error sending verification: " + err.message);
-                        }
-                    });
-                }
-            }, 0);
-        } else if (!isPremium) {
-            lockedMessage.innerHTML = `
-                <div style="background: rgba(255, 255, 255, 0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
-                    <p style="margin-bottom: 1rem; font-weight: 500;">Your account is active. Upgrade to Premium to unlock monthly access.</p>
-                    <button id="upgrade-premium-btn" class="primary" style="display: flex; align-items: center; gap: 0.5rem; justify-content: center; width: 100%;">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                        Upgrade to Premium
+        // MVP Email Capture UI
+        lockedMessage.innerHTML = `
+            <div class="mvp-unlock-container" style="text-align: center; padding: 1.5rem; background: rgba(13, 17, 23, 0.9); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); max-width: 400px; margin: 0 auto;">
+                <h3 style="margin-bottom: 1rem; color: #fff; font-size: 1.25rem;">Unlock Premium Insights</h3>
+                <p style="margin-bottom: 1.5rem; font-size: 0.9rem; color: #8b949e; line-height: 1.5;">
+                    Enter your email to instantly unlock seasonal forecasting, ROI optimization, and professional engineering data.
+                </p>
+                <form id="mvp-unlock-form" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                    <input type="email" id="mvp-email-input" placeholder="your@email.com" required 
+                           style="padding: 0.75rem; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #fff; width: 100%; font-size: 1rem;">
+                    <button type="submit" class="primary" style="padding: 0.75rem; width: 100%; display: flex; align-items: center; gap: 0.5rem; justify-content: center; font-size: 1rem; font-weight: 600;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                        Unlock Now
                     </button>
-                    <div style="margin-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1rem; text-align: left;">
-                        <p style="font-size: 0.85rem; color: #ffd700; margin-bottom: 0.5rem; font-weight: bold;">⚠️ After Payment:</p>
-                        <p style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.4;">
-                            1. Check your email for a receipt from Gumroad.<br>
-                            2. Keep this tab open; it will unlock <strong>automatically</strong>.<br>
-                            3. Your 30-day access starts the moment you pay.
-                        </p>
-                        <button id="confirm-purchase-btn" class="secondary" style="margin-top: 1rem; padding: 0.5rem 1rem; font-size: 0.8rem; width: 100%;">Already Paid? Refresh Status</button>
-                    </div>
-                </div>
-            `;
-            if (unlockBtn) unlockBtn.style.display = 'none';
-            
-            // Add listeners after innerHTML update
-            setTimeout(() => {
-                const upBtn = document.getElementById('upgrade-premium-btn');
-                if (upBtn) upBtn.addEventListener('click', handleUpgradeClick);
-                
-                const confBtn = document.getElementById('confirm-purchase-btn');
-                if (confBtn) confBtn.addEventListener('click', async () => {
-                    confBtn.disabled = true;
-                    confBtn.textContent = "Checking...";
-                    try {
-                        const res = await fetch(`${API_BASE_URL}/api/user/status/${currentUser.email}`);
-                        const data = await res.json();
-                        if (data.premium) {
-                            alert("Purchase confirmed! Unlocking features now.");
-                            window.location.reload();
-                        } else {
-                            alert("We couldn't confirm your purchase yet. If you just paid, please wait a minute for the email confirmation and try again.");
-                        }
-                    } catch (err) {
-                        alert("Error checking purchase: " + err.message);
-                    } finally {
-                        confBtn.disabled = false;
-                        confBtn.textContent = "Confirm My Purchase";
-                    }
-                });
-            }, 0);
+                </form>
+            </div>
+        `;
+        
+        const unlockForm = document.getElementById('mvp-unlock-form');
+        if (unlockForm) {
+            unlockForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const email = document.getElementById('mvp-email-input').value;
+                if (!validateEmail(email)) {
+                    alert("Please enter a valid email address.");
+                    return;
+                }
+                handleMvpUnlock(email);
+            });
         }
+    }
+}
+
+function validateEmail(email) {
+    return String(email)
+        .toLowerCase()
+        .match(/^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/);
+}
+
+async function handleMvpUnlock(email) {
+    // 1. Store in localStorage for instant access
+    localStorage.setItem('synex_premium_email', email);
+    
+    // 2. Prepare Analytics Payload
+    const analyticsData = {
+        email: email,
+        timestamp: new Date().toISOString(),
+        country: document.getElementById('country')?.value || 'Unknown',
+        event: 'premium_unlock_mvp'
+    };
+
+    console.log("Analytics Logged:", analyticsData);
+
+    // 3. UI Reveal
+    alert("Premium features unlocked! Loading insights...");
+    updatePremiumGate();
+    
+    // 4. Sync with backend for future real auth
+    try {
+        await fetch(`${API_BASE_URL}/api/analytics/unlock`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(analyticsData)
+        });
+    } catch (e) {
+        console.warn("Analytics sync failed, but access granted locally.");
     }
 }
 

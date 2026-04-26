@@ -1,5 +1,8 @@
 import os
 import uvicorn
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,12 +20,29 @@ from firebase_admin import credentials, firestore
 from datetime import datetime, timedelta, timezone
 
 # Initialize Firebase Admin
-# In production (Cloud Run), it will use the service account automatically
+# Logic: Try loading from ENV variable (Option A), then file, then default credentials
 try:
-    firebase_admin.initialize_app()
+    firebase_json = os.getenv("FIREBASE_CONFIG_JSON")
+    if firebase_json:
+        # Load from Environment Variable (Best for Render)
+        cred_dict = json.loads(firebase_json)
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred)
+        print("DEBUG: Firebase initialized via FIREBASE_CONFIG_JSON env variable.")
+    elif os.path.exists("firebase-service-account.json"):
+        # Load from local file
+        cred = credentials.Certificate("firebase-service-account.json")
+        firebase_admin.initialize_app(cred)
+        print("DEBUG: Firebase initialized via local JSON file.")
+    else:
+        # Fallback to Application Default Credentials (Cloud Run)
+        firebase_admin.initialize_app()
+        print("DEBUG: Firebase initialized with default credentials.")
 except ValueError:
     # Already initialized
     pass
+except Exception as e:
+    print(f"CRITICAL: Failed to initialize Firebase: {str(e)}")
 
 db = firestore.client()
 
@@ -108,6 +128,56 @@ async def analyze(request: AnalyzeRequest):
         # Caught by global handler but providing specific HTTP exception here for clarity
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- Email Helper ---
+def send_premium_confirmation_email(user_email: str, user_id: str):
+    """
+    Sends a confirmation email to the user when they upgrade to premium.
+    """
+    smtp_server = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", 587))
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_password = os.getenv("SMTP_PASSWORD")
+    sender_email = os.getenv("SENDER_EMAIL", smtp_user)
+
+    if not all([smtp_user, smtp_password]):
+        print("DEBUG: SMTP credentials missing, skipping email.")
+        return False
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = user_email
+        msg['Subject'] = "Welcome to Synex Premium!"
+
+        body = f"""
+        Hello,
+
+        Thank you for your purchase! Your Synex account has been upgraded to Premium.
+
+        Account Details:
+        - Email: {user_email}
+        - User ID: {user_id}
+
+        You can now access professional energy insights, seasonal forecasting, and ROI mapping.
+
+        Login here: {os.getenv('FRONTEND_URL', 'https://synex.sanelx.com')}
+
+        Best regards,
+        The Synex Team
+        """
+        msg.attach(MIMEText(body, 'plain'))
+
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.send_message(msg)
+        
+        print(f"DEBUG: Confirmation email sent to {user_email}")
+        return True
+    except Exception as e:
+        print(f"DEBUG: Failed to send email: {str(e)}")
+        return False
+
 # --- Gumroad Webhook Integration ---
 
 @app.post("/api/gumroad/webhook")
@@ -119,7 +189,6 @@ async def gumroad_webhook(request: Request):
     payload_body = await request.body()
     
     # 2. Verify Signature
-    # Gumroad sends the signature in the 'x-gumroad-signature' header
     signature = request.headers.get('x-gumroad-signature')
     secret = os.getenv("GUMROAD_WEBHOOK_SECRET")
     
@@ -131,15 +200,15 @@ async def gumroad_webhook(request: Request):
         ).hexdigest()
         
         if not hmac.compare_digest(expected_sig, signature):
+            print("DEBUG: Gumroad Webhook Invalid Signature")
             raise HTTPException(status_code=403, detail="Invalid signature")
 
     # 3. Parse Data
     try:
+        # Try JSON first
         data = await request.json()
     except Exception:
-        # Gumroad sometimes sends form-encoded data depending on version
-        # But usually it's JSON for webhooks. 
-        # For simplicity in this MVP, we assume JSON as per standard FastAPI usage.
+        # Fallback to Form Data
         form_data = await request.form()
         data = dict(form_data)
 
@@ -150,63 +219,58 @@ async def gumroad_webhook(request: Request):
     sale_id = data.get('sale_id')
     seller_id = data.get('seller_id')
     
-    # Optional: Log for debugging
-    print(f"Gumroad Webhook: {event} for {email} (UID: {user_id}, Seller: {seller_id})")
+    print(f"DEBUG: Gumroad Webhook Received. Event: {event}, Email: {email}, UID: {user_id}, Seller: {seller_id}")
 
     # 4. Filter for successful sales and specific product
     if event in ['sale', 'ping']:
-        # --- SECURITY CHECK: Seller ID ---
-        # If Secret is missing, fallback to verifying the Seller ID
+        # Security Check: Seller ID
         expected_seller_id = os.getenv("GUMROAD_SELLER_ID")
         if expected_seller_id and seller_id != expected_seller_id:
-            print(f"Unauthorized Gumroad request: Seller ID mismatch ({seller_id})")
+            print(f"DEBUG: Seller ID Mismatch. Got: {seller_id}, Expected: {expected_seller_id}")
             raise HTTPException(status_code=403, detail="Unauthorized Seller ID")
 
         # Validate Product Name
         if product_name != "Synex Premium Access" and event != 'ping':
-            print(f"Ignoring sale for unexpected product: {product_name}")
+            print(f"DEBUG: Ignoring product: {product_name}")
             return {"status": "ignored_product", "product": product_name}
 
         if user_id or email:
             try:
-                # 1. Try updating by User ID (most reliable)
+                # 1. Update by User ID
                 if user_id:
                     user_ref = db.collection('users').document(user_id)
+                    doc_snap = user_ref.get()
                     
-                    # --- IDEMPOTENCY CHECK ---
-                    doc = user_ref.get()
-                    if doc.exists():
-                        user_data = doc.to_dict()
-                        if user_data.get('last_sale_id') == sale_id:
+                    if doc_snap.exists:
+                        if doc_snap.to_dict().get('last_sale_id') == sale_id:
                             return {"status": "success", "message": "Already processed."}
                     
-                    # Calculate Monthly Expiry (30 days from now)
                     now = datetime.now(timezone.utc)
                     expiry = now + timedelta(days=30)
 
-                    user_ref.update({
+                    user_ref.set({
                         "premium": True,
                         "plan": "premium",
                         "premiumSince": now,
                         "premiumUntil": expiry,
                         "last_sale_id": sale_id,
-                        "gumroad_ip": request.client.host
-                    })
-                    return {"status": "success", "message": f"User ID {user_id} upgraded."}
+                        "email": email or doc_snap.to_dict().get('email')
+                    }, merge=True)
+                    
+                    if email:
+                        send_premium_confirmation_email(email, user_id)
+                    return {"status": "success", "message": f"User {user_id} upgraded."}
                 
-                # 2. Fallback to Email search
+                # 2. Update by Email Fallback
                 elif email:
                     users_ref = db.collection('users')
                     query = users_ref.where('email', '==', email).limit(1).get()
                     
                     if query:
                         user_doc = query[0]
-                        
-                        # IDEMPOTENCY CHECK for fallback
                         if user_doc.to_dict().get('last_sale_id') == sale_id:
                             return {"status": "success", "message": "Already processed."}
 
-                        # Calculate Monthly Expiry
                         now = datetime.now(timezone.utc)
                         expiry = now + timedelta(days=30)
 
@@ -217,16 +281,37 @@ async def gumroad_webhook(request: Request):
                             "premiumUntil": expiry,
                             "last_sale_id": sale_id
                         })
+                        
+                        send_premium_confirmation_email(email, user_doc.id)
                         return {"status": "success", "message": f"User {email} upgraded via fallback."}
                     else:
-                        print(f"Webhook error: User {email} not found.")
+                        print(f"DEBUG: Webhook - User {email} not found in database.")
                         return {"status": "pending_user_creation", "email": email}
                     
             except Exception as e:
-                print(f"Database error during webhook: {str(e)}")
+                print(f"DEBUG: Database Error during webhook: {str(e)}")
                 raise HTTPException(status_code=500, detail="Database update failed")
     
     return {"status": "ignored", "event": event}
+
+@app.post("/api/analytics/unlock")
+async def log_unlock(request: Request):
+    """
+    Logs premium unlock events for analytics.
+    """
+    try:
+        data = await request.json()
+        print(f"ANALYTICS: User {data.get('email')} unlocked premium from {data.get('country')} at {data.get('timestamp')}")
+        
+        # Save to Firestore for future follow-ups
+        db.collection('analytics_unlocks').add({
+            **data,
+            "server_timestamp": firestore.SERVER_TIMESTAMP
+        })
+        return {"status": "logged"}
+    except Exception as e:
+        print(f"DEBUG: Analytics logging failed: {str(e)}")
+        return {"status": "error", "message": str(e)}
 
 @app.get("/api/user/status/{user_id_or_email}")
 async def get_user_status(user_id_or_email: str):
@@ -234,6 +319,7 @@ async def get_user_status(user_id_or_email: str):
     Checks if a user has premium status.
     Accepts either Firebase UID or Email.
     """
+    print(f"DEBUG: Checking status for: {user_id_or_email}")
     try:
         # 1. Try by UID first
         user_ref = db.collection('users').document(user_id_or_email)
@@ -241,6 +327,7 @@ async def get_user_status(user_id_or_email: str):
         
         if doc.exists():
             user_data = doc.to_dict()
+            print(f"DEBUG: Found user by UID: {user_id_or_email}. Premium: {user_data.get('premium')}")
             return {
                 "uid": doc.id,
                 "email": user_data.get("email"),
@@ -250,12 +337,14 @@ async def get_user_status(user_id_or_email: str):
             }
         
         # 2. Try by Email
+        print(f"DEBUG: UID {user_id_or_email} not found, trying email lookup...")
         users_ref = db.collection('users')
-        query = users_ref.where('email', '==', user_id_or_email).limit(1).get()
+        query = users_ref.where('email', '==', user_id_or_email.lower()).limit(1).get()
         
         if query:
             user_doc = query[0]
             user_data = user_doc.to_dict()
+            print(f"DEBUG: Found user by Email: {user_id_or_email}. Premium: {user_data.get('premium')}")
             return {
                 "uid": user_doc.id,
                 "email": user_data.get("email"),
@@ -264,10 +353,11 @@ async def get_user_status(user_id_or_email: str):
                 "premiumUntil": user_data.get("premiumUntil").isoformat() if user_data.get("premiumUntil") else None
             }
             
+        print(f"DEBUG: User {user_id_or_email} not found in database.")
         return {"error": "User not found", "premium": False}
         
     except Exception as e:
-        print(f"Error checking user status: {str(e)}")
+        print(f"DEBUG: Error checking user status: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to fetch user status")
 
 # --- Local Static Serving ---
