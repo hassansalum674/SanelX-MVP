@@ -3,79 +3,92 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Synex Energy Analyzer</title>
-    <link rel="stylesheet" href="style.css?v=1.3">
+    <title>Synex — Energy Intelligence Engine</title>
+    <meta name="description" content="Professional solar and battery simulation engine. Get instant ROI analysis, seasonal forecasting, and engineering-grade energy reports for residential and commercial systems.">
+    <link rel="stylesheet" href="style.css?v=2.0">
     <link rel="icon" type="image/x-icon" href="logos/favicon.ico">
-    <!-- Font Awesome for Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
     <div class="app-layout">
-        <!-- Sidebar Navigation -->
+
+        <!-- ══════════════════════════════════ SIDEBAR ══════════════════════════════════ -->
         <aside class="sidebar" id="app-sidebar">
             <div class="sidebar-brand">
-                <img src="logos/sanelx_icon_white.png" alt="SanelX" class="sidebar-logo">
+                <img src="logos/sanelx_icon_white.png" alt="SanelX" class="sidebar-logo" onerror="this.style.display='none'">
                 <h1>SYNEX</h1>
             </div>
-            
-            <nav class="nav-menu">
-                <li class="nav-item">
-                    <a href="#" class="nav-link active" id="nav-analyzer">
-                        <i class="fas fa-chart-line"></i>
-                        <span>Analyzer</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" id="nav-settings">
-                        <i class="fas fa-cog"></i>
-                        <span>Settings</span>
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a href="#" class="nav-link" id="nav-account">
-                        <i class="fas fa-user-circle"></i>
-                        <span>Account</span>
-                    </a>
-                </li>
+
+            <nav>
+                <ul class="nav-menu">
+                    <li class="nav-item">
+                        <a href="#analyzer" class="nav-link active" id="nav-analyzer">
+                            <i class="fas fa-chart-line"></i><span>Analyzer</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#" class="nav-link" id="nav-history">
+                            <i class="fas fa-history"></i><span>History</span>
+                            <span class="nav-badge">Soon</span>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="#" class="nav-link" id="nav-settings">
+                            <i class="fas fa-cog"></i><span>Settings</span>
+                        </a>
+                    </li>
+                </ul>
             </nav>
 
             <div class="sidebar-footer">
-                <div id="user-profile-nav" style="display: none; padding: 0.75rem 1rem;">
-                    <div class="user-info-tiny">
-                        <i class="fas fa-user-circle"></i>
-                        <span id="user-email-display">user@example.com</span>
-                    </div>
+                <div id="user-profile-nav" class="user-chip" style="display:none;">
+                    <i class="fas fa-user-circle"></i>
+                    <span id="user-email-display" class="user-email-chip">user@example.com</span>
                 </div>
                 <a href="#" class="nav-link" id="auth-btn-nav">
-                    <i class="fas fa-sign-in-alt"></i>
+                    <i class="fas fa-sign-in-alt" id="auth-icon-nav"></i>
                     <span id="auth-btn-text-nav">Sign In</span>
                 </a>
             </div>
         </aside>
 
-        <!-- Main Dashboard Content -->
+        <!-- Mobile Header -->
+        <div class="mobile-header">
+            <button class="hamburger" id="hamburger-btn" aria-label="Open navigation">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="mobile-brand">
+                <img src="logos/sanelx_icon_white.png" alt="SanelX" class="sidebar-logo" style="height:24px;" onerror="this.style.display='none'">
+                <span>SYNEX</span>
+            </div>
+        </div>
+        <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+        <!-- ══════════════════════════════════ MAIN CONTENT ══════════════════════════════════ -->
         <main class="main-content">
+
             <div class="page-header">
                 <div class="page-title">
                     <h2>Energy Intelligence</h2>
-                    <p>Residential & Commercial Solar Optimization</p>
-                </div>
-                <div class="header-actions">
-                    <div id="premium-badge" class="premium-badge" style="display: none;">
-                        <i class="fas fa-crown"></i> Premium
-                    </div>
+                    <p>Residential &amp; Commercial Solar &amp; Battery Simulation</p>
                 </div>
             </div>
 
-            <div class="dashboard-grid">
-                <!-- System Parameters -->
-                <section class="glass-card">
+            <!-- ── ANALYZER SECTION ── -->
+            <div id="analyzer" class="dashboard-grid">
+
+                <!-- System Parameters Card -->
+                <section class="glass-card span-2">
                     <div class="card-header">
                         <i class="fas fa-sliders-h"></i>
                         <h3>System Parameters</h3>
                     </div>
+
                     <form id="analyze-form">
-                        <div class="input-grid">
+                        <!-- Row 1: Region + Climate + Grid Price -->
+                        <div class="input-grid cols-3">
                             <div class="input-group">
                                 <label for="country">Country / Region</label>
                                 <select id="country">
@@ -89,83 +102,240 @@
                                     <option value="Custom">Custom / Advanced</option>
                                 </select>
                             </div>
-
                             <div class="input-group">
                                 <label for="climate">Solar Baseline</label>
                                 <select id="climate">
-                                    <option value="desert">Desert High Sun</option>
-                                    <option value="high" selected>High Sun</option>
-                                    <option value="moderate">Moderate Sun</option>
-                                    <option value="cloudy">Cloudy / Rainy</option>
+                                    <option value="desert">Desert High Sun (6–7 peak hrs)</option>
+                                    <option value="high" selected>High Sun (5–6 peak hrs)</option>
+                                    <option value="moderate">Moderate Sun (4–5 peak hrs)</option>
+                                    <option value="cloudy">Cloudy / Rainy (2–3 peak hrs)</option>
                                 </select>
                             </div>
-
                             <div class="input-group">
-                                <label for="grid-price">Grid Price (<span class="currency-symbol">$</span>/kWh)</label>
-                                <input type="number" id="grid-price" step="0.01" value="0.15">
-                            </div>
-
-                            <div class="input-group">
-                                <label for="solar-kw">Solar Array (kWp)</label>
-                                <input type="number" id="solar-kw" step="0.5" value="5.0">
-                            </div>
-
-                            <div class="input-group">
-                                <label for="battery-kwh">Battery Storage (kWh)</label>
-                                <input type="number" id="battery-kwh" step="0.5" value="10.0">
-                            </div>
-
-                            <div class="input-group">
-                                <label for="battery-initial">Initial Battery (%)</label>
-                                <input type="number" id="battery-initial" step="5" value="50">
-                            </div>
-
-                            <div class="input-group full-width">
-                                <label for="hourly-demand">Hourly Demand (24 values, comma separated)</label>
-                                <textarea id="hourly-demand" placeholder="e.g. 0.5, 0.4, 0.4, ...">1.2, 0.8, 0.6, 0.5, 0.4, 0.4, 0.6, 1.2, 2.5, 3.0, 2.8, 2.5, 2.4, 2.2, 2.4, 2.8, 4.5, 5.5, 6.0, 5.5, 4.2, 3.0, 2.0, 1.5</textarea>
+                                <label for="grid-price">Grid Tariff (<span class="currency-symbol">$</span>/kWh)</label>
+                                <input type="number" id="grid-price" step="0.01" min="0" value="0.15">
                             </div>
                         </div>
 
-                        <button type="submit" id="analyze-btn">
-                            <i class="fas fa-microchip"></i>
-                            <span>Analyze System</span>
-                            <div class="loader" id="analyze-loader"></div>
-                        </button>
+                        <!-- Row 2: Hardware Sizes -->
+                        <div class="input-grid cols-3">
+                            <div class="input-group">
+                                <label for="solar-kw">Solar Array Size (kWp)</label>
+                                <input type="number" id="solar-kw" step="0.5" min="0" value="5.0">
+                            </div>
+                            <div class="input-group">
+                                <label for="battery-kwh">Battery Capacity (kWh)</label>
+                                <input type="number" id="battery-kwh" step="0.5" min="0" value="10.0">
+                            </div>
+                            <div class="input-group">
+                                <label for="battery-initial">Starting Charge (%)</label>
+                                <input type="number" id="battery-initial" step="5" min="0" max="100" value="50">
+                            </div>
+                        </div>
+
+                        <!-- Row 3: Load Profile Templates -->
+                        <div class="input-group">
+                            <label>Load Profile Template</label>
+                            <div class="profile-tiles" id="profile-tiles">
+                                <button type="button" class="profile-tile active" data-profile="residential_day">
+                                    <i class="fas fa-home"></i>
+                                    <span>Residential (Day)</span>
+                                </button>
+                                <button type="button" class="profile-tile" data-profile="residential_night">
+                                    <i class="fas fa-moon"></i>
+                                    <span>Residential (Evening)</span>
+                                </button>
+                                <button type="button" class="profile-tile" data-profile="office">
+                                    <i class="fas fa-building"></i>
+                                    <span>Small Office</span>
+                                </button>
+                                <button type="button" class="profile-tile" data-profile="industrial">
+                                    <i class="fas fa-industry"></i>
+                                    <span>Light Industrial</span>
+                                </button>
+                                <button type="button" class="profile-tile" data-profile="custom">
+                                    <i class="fas fa-edit"></i>
+                                    <span>Custom</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Custom Demand Input (hidden unless Custom selected) -->
+                        <div class="input-group" id="custom-demand-group" style="display:none;">
+                            <label for="hourly-demand">Hourly Demand — 24 comma-separated values (kWh)</label>
+                            <textarea id="hourly-demand" rows="3" placeholder="0.5, 0.4, 0.4, 0.4, 0.5, 0.7, 1.2, 2.5, ..."></textarea>
+                        </div>
+                        <input type="hidden" id="hourly-demand-hidden">
+
+                        <div class="form-actions">
+                            <button type="submit" id="analyze-btn" class="primary-btn">
+                                <i class="fas fa-microchip"></i>
+                                <span id="analyze-btn-text">Analyze System</span>
+                                <div class="spinner" id="analyze-spinner" style="display:none;"></div>
+                            </button>
+                            <div class="error-msg" id="analyze-error" style="display:none;"></div>
+                        </div>
                     </form>
                 </section>
 
-                <!-- Educational Info -->
-                <section class="glass-card education-card">
+                <!-- Education Card -->
+                <section class="glass-card info-card">
                     <div class="card-header">
                         <i class="fas fa-info-circle"></i>
-                        <h3>Simulation Logic</h3>
+                        <h3>How It Works</h3>
                     </div>
-                    <p class="education-text">
-                        Synex simulates each hour of a typical day (24 hourly steps) using your demand pattern, solar production, battery storage, and grid pricing. 
-                        This full-day model runs instantly to predict system performance and ROI.
-                    </p>
+                    <p class="info-text">Synex runs a <strong>24-hour hourly simulation</strong> of your energy system — modelling solar production, battery charge/discharge, and grid draw for every hour of a representative day.</p>
+                    <ul class="info-list">
+                        <li><i class="fas fa-sun"></i> Solar generation based on regional irradiance data</li>
+                        <li><i class="fas fa-battery-three-quarters"></i> Battery modelled with round-trip efficiency losses</li>
+                        <li><i class="fas fa-plug"></i> Grid usage calculated to fill any remaining demand gap</li>
+                        <li><i class="fas fa-chart-bar"></i> ROI computed against a grid-only baseline scenario</li>
+                    </ul>
                 </section>
             </div>
 
-            <!-- Results Section (Dynamic) -->
-            <div id="results-area" class="results-section">
-                <!-- Injected via script.js -->
+            <!-- ── RESULTS SECTION ── -->
+            <div id="results-area" style="display:none; margin-top:2rem;">
+
+                <!-- KPI Summary Cards -->
+                <div class="kpi-grid" id="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-icon" style="background: rgba(88,166,255,0.15);"><i class="fas fa-dollar-sign" style="color:#58a6ff;"></i></div>
+                        <div class="kpi-body">
+                            <span class="kpi-label">Daily Operating Cost</span>
+                            <span class="kpi-value" id="kpi-daily-cost">—</span>
+                            <span class="kpi-sub" id="kpi-daily-cost-sub"></span>
+                        </div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-icon" style="background: rgba(63,185,80,0.15);"><i class="fas fa-sun" style="color:#3fb950;"></i></div>
+                        <div class="kpi-body">
+                            <span class="kpi-label">Solar Coverage</span>
+                            <span class="kpi-value" id="kpi-solar">—</span>
+                            <span class="kpi-sub" id="kpi-solar-sub"></span>
+                        </div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-icon" style="background: rgba(210,153,34,0.15);"><i class="fas fa-plug" style="color:#d29922;"></i></div>
+                        <div class="kpi-body">
+                            <span class="kpi-label">Grid Dependency</span>
+                            <span class="kpi-value" id="kpi-grid">—</span>
+                            <span class="kpi-sub" id="kpi-grid-sub"></span>
+                        </div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-icon" style="background: rgba(188,140,255,0.15);"><i class="fas fa-calendar-alt" style="color:#bc8cff;"></i></div>
+                        <div class="kpi-body">
+                            <span class="kpi-label">Payback Period</span>
+                            <span class="kpi-value" id="kpi-payback">—</span>
+                            <span class="kpi-sub" id="kpi-payback-sub"></span>
+                        </div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-icon" style="background: rgba(63,185,80,0.12);"><i class="fas fa-leaf" style="color:#3fb950;"></i></div>
+                        <div class="kpi-body">
+                            <span class="kpi-label">CO₂ Avoided</span>
+                            <span class="kpi-value" id="kpi-co2">—</span>
+                            <span class="kpi-sub" id="kpi-co2-sub"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Investment Decision -->
+                <div class="results-grid">
+                    <section class="glass-card">
+                        <div class="card-header"><i class="fas fa-gavel"></i><h3>Investment Decision</h3></div>
+                        <div class="decision-status" id="decision-status">—</div>
+                        <p id="decision-reason" class="decision-reason"></p>
+                        <div class="decision-meta-row">
+                            <span>Confidence</span><strong id="decision-confidence">—</strong>
+                        </div>
+                        <div class="decision-meta-row">
+                            <span>Annual Net Savings</span><strong id="decision-savings" style="color:var(--success-color);">—</strong>
+                        </div>
+                        <div class="decision-meta-row">
+                            <span>Optimal Battery Size</span><strong id="decision-battery">—</strong>
+                        </div>
+                        <div class="decision-meta-row">
+                            <span>Est. System Cost</span><strong id="decision-system-cost">—</strong>
+                        </div>
+                    </section>
+
+                    <section class="glass-card">
+                        <div class="card-header"><i class="fas fa-lightbulb"></i><h3>Key Insights</h3></div>
+                        <div id="key-insights-list" class="insights-list"></div>
+                    </section>
+                </div>
+
+                <!-- Energy Chart -->
+                <section class="glass-card" style="margin-top:2rem;">
+                    <div class="card-header"><i class="fas fa-chart-area"></i><h3>24-Hour Energy Flow</h3></div>
+                    <div class="chart-container">
+                        <canvas id="energy-chart"></canvas>
+                    </div>
+                </section>
+
+                <!-- Scenario Comparison + Seasonal -->
+                <div class="results-grid" style="margin-top:2rem;">
+                    <section class="glass-card">
+                        <div class="card-header"><i class="fas fa-balance-scale"></i><h3>Scenario Comparison</h3></div>
+                        <div id="scenarios-grid" class="summary-grid"></div>
+                    </section>
+                    <section class="glass-card">
+                        <div class="card-header"><i class="fas fa-cloud-sun"></i><h3>Seasonal Outlook</h3></div>
+                        <div id="seasonal-grid" class="summary-grid"></div>
+                    </section>
+                </div>
+
+                <!-- Grid Price Sensitivity -->
+                <section class="glass-card" style="margin-top:2rem;">
+                    <div class="card-header"><i class="fas fa-chart-line"></i><h3>Grid Price Sensitivity</h3></div>
+                    <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:1rem;">How your costs change if your utility raises rates:</p>
+                    <div id="sensitivity-container"></div>
+                </section>
+
+                <!-- Action Plan -->
+                <section class="glass-card" style="margin-top:2rem;">
+                    <div class="card-header"><i class="fas fa-tasks"></i><h3>Recommended Action Plan</h3></div>
+                    <div id="action-plan" class="action-plan"></div>
+                </section>
+
+                <!-- Hourly Engineering Detail -->
+                <section class="glass-card" style="margin-top:2rem;">
+                    <div class="card-header"><i class="fas fa-cogs"></i><h3>Engineering Detail</h3></div>
+                    <div id="hourly-insights-grid" class="summary-grid" style="margin-bottom:1.5rem;"></div>
+                    <div id="model-notes-container" class="model-notes-section" style="display:none;"></div>
+                    <div class="assumptions-section">
+                        <h4>Simulation Assumptions</h4>
+                        <div class="assumptions-grid" id="assumptions-content"></div>
+                    </div>
+                </section>
+
+                <!-- Report Actions -->
+                <div class="report-actions" style="margin-top:2rem;">
+                    <button type="button" class="secondary-btn" id="download-report-btn">
+                        <i class="fas fa-print"></i> Print / Save PDF
+                    </button>
+                    <button type="button" class="secondary-btn" id="reset-btn">
+                        <i class="fas fa-redo"></i> New Analysis
+                    </button>
+                </div>
             </div>
+
         </main>
     </div>
 
-    <!-- Settings Modal -->
+    <!-- ══════════════════════════════════ SETTINGS MODAL ══════════════════════════════════ -->
     <div class="modal-overlay" id="settings-modal">
         <div class="modal-content">
-            <button class="close-btn" id="close-settings-btn">&times;</button>
+            <button class="close-btn" id="close-settings-btn" aria-label="Close">&times;</button>
             <div class="modal-header">
-                <h2><i class="fas fa-cog"></i> Dashboard Settings</h2>
-                <p>Personalize your energy intelligence experience.</p>
+                <h2><i class="fas fa-cog"></i> Settings</h2>
+                <p>Personalise your simulation experience</p>
             </div>
-            
             <div class="settings-body">
                 <div class="settings-section">
-                    <h4>General Preferences</h4>
+                    <h4>Regional Defaults</h4>
                     <div class="input-group mt-1">
                         <label>Preferred Currency</label>
                         <select id="setting-currency">
@@ -173,66 +343,69 @@
                             <option value="TZS">TZS (Tsh)</option>
                             <option value="KES">KES (Ksh)</option>
                             <option value="NGN">NGN (₦)</option>
+                            <option value="ZAR">ZAR (R)</option>
                             <option value="EUR">EUR (€)</option>
+                            <option value="GBP">GBP (£)</option>
+                            <option value="INR">INR (₹)</option>
+                            <option value="AED">AED (د.إ)</option>
                         </select>
                     </div>
                 </div>
-
                 <div class="settings-section mt-2">
                     <h4>Hardware Cost Presets</h4>
-                    <p class="helper-text">These values impact ROI and payback calculations.</p>
-                    <div class="input-grid mt-1">
+                    <p class="helper-text">Used in ROI calculations. Leave blank to use regional defaults.</p>
+                    <div class="input-grid cols-2 mt-1">
                         <div class="input-group">
-                            <label>Solar Cost ($/kW)</label>
-                            <input type="number" id="setting-solar-cost" value="1200">
+                            <label>Solar Cost ($/kWp)</label>
+                            <input type="number" id="setting-solar-cost" placeholder="e.g. 1200">
                         </div>
                         <div class="input-group">
                             <label>Battery Cost ($/kWh)</label>
-                            <input type="number" id="setting-battery-cost" value="450">
+                            <input type="number" id="setting-battery-cost" placeholder="e.g. 450">
                         </div>
                     </div>
                 </div>
             </div>
-
             <div class="modal-footer mt-2">
-                <button type="button" class="primary" id="save-settings-btn">Save Changes</button>
+                <button type="button" class="primary-btn" id="save-settings-btn">Save Changes</button>
             </div>
         </div>
     </div>
 
-    <!-- Authentication Modal -->
+    <!-- ══════════════════════════════════ AUTH MODAL ══════════════════════════════════ -->
     <div class="modal-overlay" id="auth-modal">
         <div class="modal-content">
-            <button class="close-btn" id="close-modal-btn">&times;</button>
+            <button class="close-btn" id="close-modal-btn" aria-label="Close">&times;</button>
             <div class="modal-header">
                 <h2>Welcome to Synex</h2>
-                <p>Sign in to unlock full premium insights.</p>
+                <p>Sign in to save your analyses and personalise settings</p>
             </div>
             <div class="auth-tabs">
                 <button class="tab-btn active" data-tab="signin">Sign In</button>
                 <button class="tab-btn" data-tab="signup">Sign Up</button>
             </div>
-            <form id="auth-form" class="auth-form">
+            <form id="auth-form" class="auth-form" autocomplete="on">
                 <div class="input-group">
-                    <label for="auth-email">Email Address</label>
-                    <input type="email" id="auth-email" required placeholder="you@example.com">
+                    <label for="auth-email">Email</label>
+                    <input type="email" id="auth-email" required placeholder="you@example.com" autocomplete="email">
                 </div>
                 <div class="input-group">
                     <label for="auth-password">Password</label>
-                    <input type="password" id="auth-password" required placeholder="••••••••">
+                    <input type="password" id="auth-password" required placeholder="••••••••" autocomplete="current-password">
                 </div>
-                <button type="submit" class="primary-auth-btn" id="auth-submit-btn">Sign In</button>
+                <button type="submit" class="primary-btn full-width" id="auth-submit-btn">Sign In</button>
             </form>
-            <div class="auth-divider"><span>OR</span></div>
-            <button type="button" class="google-auth-btn" id="google-auth-btn">
+            <div class="auth-divider"><span>or</span></div>
+            <button type="button" class="google-btn" id="google-auth-btn">
                 <i class="fab fa-google"></i> Continue with Google
             </button>
+            <p class="auth-note">Your analyses and settings are saved to your account.</p>
         </div>
     </div>
 
     <!-- Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="config.js?v=1.2"></script>
-    <script src="script.js?v=1.3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="config.js?v=2.0"></script>
+    <script type="module" src="script.js?v=2.0"></script>
 </body>
 </html>

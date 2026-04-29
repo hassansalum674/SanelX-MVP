@@ -152,24 +152,7 @@ async def save_settings(user_id: str, settings: UserSettings):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/analytics/unlock")
-async def log_unlock(request: Request):
-    """
-    Logs premium unlock events for analytics.
-    """
-    try:
-        data = await request.json()
-        print(f"ANALYTICS: User {data.get('email')} unlocked premium from {data.get('country')} at {data.get('timestamp')}")
-        
-        # Save to Firestore for future follow-ups
-        db.collection('analytics_unlocks').add({
-            **data,
-            "server_timestamp": firestore.SERVER_TIMESTAMP
-        })
-        return {"status": "logged"}
-    except Exception as e:
-        print(f"DEBUG: Analytics logging failed: {str(e)}")
-        return {"status": "error", "message": str(e)}
+## Analytics unlock endpoint removed — no more premium gating
 
 @app.get("/api/user/status/{user_id_or_email}")
 async def get_user_status(user_id_or_email: str):
