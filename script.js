@@ -1,23 +1,11 @@
 // ═══════════════════════════════════════════════════
-// SYNEX v2.0 — Clean rewrite, no gates, no broken imports
+// SYNEX v2.1 — Compact Dashboard, History & Currency Fixes
 // ═══════════════════════════════════════════════════
 
-// --- Firebase ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
 import { 
-    getFirestore, 
-    doc, 
-    setDoc, 
-    onSnapshot,
-    collection,
-    query,
-    where,
-    orderBy,
-    getDocs,
-    addDoc,
-    deleteDoc,
-    getDoc
+    getFirestore, doc, setDoc, onSnapshot, collection, query, where, orderBy, getDocs, addDoc, deleteDoc, getDoc 
 } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -33,7 +21,7 @@ const auth = getAuth(fbApp);
 const dbFs = getFirestore(fbApp);
 const googleProvider = new GoogleAuthProvider();
 
-// --- Config ---
+// --- State ---
 const API_BASE = window.SYNEX_CONFIG?.API_URL?.replace('/analyze', '') || 'http://localhost:8000';
 const ANALYZE_URL = `${API_BASE}/analyze`;
 let currentUser = null;
@@ -42,16 +30,21 @@ let monthlyChartInstance = null;
 let authMode = 'signin';
 let userSettings = { currency: 'USD', solar_cost_preset: 1200, battery_cost_preset: 450 };
 
-// --- Solar Profile Generator (inlined, no broken module import) ---
+// --- Helpers ---
+function $(id) { return document.getElementById(id); }
+function parseCommaList(str) { return str.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v)); }
+function getCurrencySymbol() {
+    const syms = {USD:'$',TZS:'Tsh',KES:'Ksh',NGN:'₦',ZAR:'R',EUR:'€',GBP:'£',INR:'₹',AED:'د.إ'};
+    return syms[userSettings.currency] || '$';
+}
+
+// --- Data ---
 const SOLAR_PROFILES = {
     desert:   [0,0,0,0,0,0.02,0.15,0.4,0.7,0.9,0.98,1.0,0.98,0.9,0.7,0.4,0.15,0.02,0,0,0,0,0,0],
     high:     [0,0,0,0,0,0,0.05,0.2,0.5,0.8,0.95,1.0,0.95,0.8,0.5,0.2,0.05,0,0,0,0,0,0,0],
     moderate: [0,0,0,0,0,0,0.02,0.1,0.3,0.55,0.7,0.75,0.7,0.55,0.3,0.1,0.02,0,0,0,0,0,0,0],
     cloudy:   [0,0,0,0,0,0,0.01,0.05,0.15,0.3,0.4,0.42,0.4,0.3,0.15,0.05,0.01,0,0,0,0,0,0,0]
 };
-function getSolarProfile(climate) { return SOLAR_PROFILES[climate] || SOLAR_PROFILES.high; }
-
-// --- Load Profile Templates ---
 const LOAD_PROFILES = {
     residential_day:   [0.4,0.3,0.3,0.3,0.4,0.6,1.0,1.8,1.5,1.2,1.0,0.8,0.7,0.7,0.8,1.0,1.5,2.5,3.5,3.8,3.0,2.0,1.2,0.6],
     residential_night: [0.5,0.4,0.3,0.3,0.3,0.4,0.5,0.6,0.7,0.6,0.5,0.5,0.5,0.5,0.5,0.6,1.0,2.0,3.5,4.5,4.0,3.5,2.5,1.0],
@@ -60,68 +53,77 @@ const LOAD_PROFILES = {
 };
 let activeProfile = 'residential_day';
 
-// --- CO2 Emission Factors (kg CO2 per kWh grid) by country ---
-const CO2_FACTORS = { Tanzania:0.35, Kenya:0.25, Nigeria:0.45, "South Africa":0.9, India:0.7, UAE:0.42, USA:0.38, Custom:0.5 };
-
-// --- Region Cost Presets ---
-const REGION_COSTS = {
-    USA:{solar:2800,batt:600,inst:2500}, Tanzania:{solar:1200,batt:350,inst:800},
-    Nigeria:{solar:1400,batt:400,inst:1000}, "South Africa":{solar:1600,batt:450,inst:1200},
-    Kenya:{solar:1300,batt:380,inst:900}, India:{solar:800,batt:300,inst:500},
-    UAE:{solar:1100,batt:320,inst:700}
-};
-
 // ═══════════════════════════════════════════
-// UI NAVIGATION
+// UI NAVIGATION & INITIALIZATION
 // ═══════════════════════════════════════════
 
 function showSection(id) {
-    $('analyzer').style.display = id === 'analyzer' ? 'grid' : 'none';
-    $('history-area').style.display = id === 'history' ? 'block' : 'none';
-    $('results-area').style.display = id === 'results' ? 'block' : 'none';
+    $('analyzer-view').style.display = id === 'analyzer' ? 'block' : 'none';
+    $('history-view').style.display = id === 'history' ? 'block' : 'none';
+    $('results-view').style.display = id === 'results' ? 'block' : 'none';
     
     document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-    $(`nav-${id === 'results' ? 'analyzer' : id}`).classList.add('active');
+    const navBtn = id === 'results' ? $('nav-analyzer') : $(`nav-${id}`);
+    if (navBtn) navBtn.classList.add('active');
 }
 
 $('nav-analyzer')?.addEventListener('click', e => { e.preventDefault(); showSection('analyzer'); });
 $('nav-history')?.addEventListener('click', e => { e.preventDefault(); showSection('history'); loadHistory(); });
 
-// Settings modal
+// Sidebar toggle
+const hamburger = $('hamburger-btn');
+const backdrop = $('sidebar-backdrop');
+const sidebar = $('app-sidebar');
+if (hamburger) hamburger.onclick = () => { sidebar.classList.toggle('open'); backdrop.classList.toggle('active'); };
+if (backdrop) backdrop.onclick = () => { sidebar.classList.remove('open'); backdrop.classList.remove('active'); };
+
+// Settings
 const settingsModal = $('settings-modal');
 $('nav-settings')?.addEventListener('click', e => { e.preventDefault(); settingsModal.classList.add('active'); });
 $('close-settings-btn')?.addEventListener('click', () => settingsModal.classList.remove('active'));
-settingsModal?.addEventListener('click', e => { if (e.target === settingsModal) settingsModal.classList.remove('active'); });
-
 $('save-settings-btn')?.addEventListener('click', async () => {
     userSettings.currency = $('setting-currency').value;
     userSettings.solar_cost_preset = parseFloat($('setting-solar-cost').value) || 1200;
     userSettings.battery_cost_preset = parseFloat($('setting-battery-cost').value) || 450;
-    const syms = {USD:'$',TZS:'Tsh',KES:'Ksh',NGN:'₦',ZAR:'R',EUR:'€',GBP:'£',INR:'₹',AED:'د.إ'};
-    document.querySelectorAll('.currency-symbol').forEach(el => el.innerText = syms[userSettings.currency]||'$');
+    
+    document.querySelectorAll('.currency-symbol').forEach(el => el.innerText = getCurrencySymbol());
     if (currentUser) {
-        try { await fetch(`${API_BASE}/api/user/settings/${currentUser.uid}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(userSettings) }); } catch(e) {}
+        try { await setDoc(doc(dbFs,"users",currentUser.uid), { settings:userSettings }, { merge:true }); } catch(e) {}
     }
     settingsModal.classList.remove('active');
 });
 
-// Profile tile selection
+// Profile Tiles
 document.querySelectorAll('.profile-tile').forEach(tile => {
     tile.addEventListener('click', () => {
         document.querySelectorAll('.profile-tile').forEach(t => t.classList.remove('active'));
         tile.classList.add('active');
         activeProfile = tile.dataset.profile;
-        const customGroup = $('custom-demand-group');
-        if (activeProfile === 'custom') {
-            customGroup.style.display = 'block';
-        } else {
-            customGroup.style.display = 'none';
-        }
+        $('custom-demand-group').style.display = activeProfile === 'custom' ? 'block' : 'none';
     });
 });
 
+// Chart Tabs
+document.querySelectorAll('.chart-tab-btn').forEach(btn => {
+    btn.onclick = () => {
+        document.querySelectorAll('.chart-tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const isHourly = btn.dataset.chart === 'hourly';
+        $('hourly-chart-container').style.display = isHourly ? 'block' : 'none';
+        $('monthly-chart-container').style.display = isHourly ? 'none' : 'block';
+    };
+});
+
+// Engineering Toggle
+$('toggle-engineering')?.addEventListener('click', () => {
+    const content = $('engineering-content');
+    const isHidden = content.style.display === 'none';
+    content.style.display = isHidden ? 'block' : 'none';
+    $('toggle-engineering').querySelector('.fa-chevron-down').style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0)';
+});
+
 // ═══════════════════════════════════════════
-// FORM SUBMISSION — THE CORE
+// ANALYSIS ENGINE
 // ═══════════════════════════════════════════
 
 $('analyze-form').addEventListener('submit', async (e) => {
@@ -133,43 +135,38 @@ $('analyze-form').addEventListener('submit', async (e) => {
 
     btn.disabled = true;
     if (spinner) spinner.style.display = 'inline-block';
-    btnText.textContent = 'Analyzing…';
+    btnText.textContent = 'Processing...';
     errorEl.style.display = 'none';
 
     try {
-        // Build demand array
-        let demand;
-        if (activeProfile === 'custom') {
-            demand = parseCommaList($('hourly-demand').value);
-            if (demand.length !== 24) throw new Error('Custom demand must have exactly 24 values.');
-        } else {
-            demand = LOAD_PROFILES[activeProfile];
-        }
+        let demand = activeProfile === 'custom' ? parseCommaList($('hourly-demand').value) : LOAD_PROFILES[activeProfile];
+        if (demand.length !== 24) throw new Error('Load profile must have 24 values.');
 
         const payload = {
-            solar_kw: parseFloat($('solar-kw').value) || 5,
-            battery_kwh: parseFloat($('battery-kwh').value) || 10,
-            initial_battery_kwh: (parseFloat($('battery-initial').value) || 50) / 100 * (parseFloat($('battery-kwh').value) || 10),
+            solar_kw: parseFloat($('solar-kw').value) || 0,
+            battery_kwh: parseFloat($('battery-kwh').value) || 0,
+            initial_battery_kwh: (parseFloat($('battery-initial').value) || 0) / 100 * (parseFloat($('battery-kwh').value) || 1),
             grid_price: parseFloat($('grid-price').value) || 0.15,
             cost_params: {
                 solar_cost_kw: userSettings.solar_cost_preset || 1200,
                 battery_cost_kwh: userSettings.battery_cost_preset || 450,
-                install_fee: (REGION_COSTS[$('country').value] || {}).inst || 1000,
+                install_fee: 1000,
                 maint_pct: 1.0
             },
             hourly_demand: demand,
-            hourly_solar_profile: getSolarProfile($('climate').value)
+            hourly_solar_profile: SOLAR_PROFILES[$('climate').value] || SOLAR_PROFILES.high
         };
 
         const res = await fetch(ANALYZE_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
-        if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.detail || err.message || `Server error ${res.status}`); }
+        if (!res.ok) throw new Error('Backend failed.');
         const data = await res.json();
+        
         renderResults(data);
-        $('results-area').style.display = 'block';
-        $('results-area').scrollIntoView({ behavior:'smooth' });
+        showSection('results');
+        window.scrollTo({ top:0, behavior:'smooth' });
 
     } catch (err) {
-        errorEl.textContent = '⚠ ' + err.message;
+        errorEl.textContent = 'Error: ' + err.message;
         errorEl.style.display = 'block';
     } finally {
         btn.disabled = false;
@@ -178,375 +175,230 @@ $('analyze-form').addEventListener('submit', async (e) => {
     }
 });
 
-// ═══════════════════════════════════════════
-// RENDER RESULTS — ALL OPEN, NO GATES
-// ═══════════════════════════════════════════
-
 function renderResults(data) {
     const s = data.summary;
     const p = data.premium_insights;
     const advisor = data.advisor || {};
     const assumptions = data.assumptions || {};
     const roi = p.smart_recommendation;
-    const insight = advisor.professional_insight || {};
-    const country = $('country').value;
+    const symbol = getCurrencySymbol();
 
-    // --- KPI Cards ---
-    $('kpi-daily-cost').innerText = `$${(s.total_operational_cost||0).toFixed(2)}`;
-    $('kpi-daily-cost-sub').innerText = `Grid: $${(s.total_grid_cost||0).toFixed(2)}`;
+    // KPIs
+    $('kpi-daily-cost').innerText = (s.total_operational_cost||0).toFixed(2);
+    $('kpi-daily-cost-sub').innerText = `Grid: ${symbol}${(s.total_grid_cost||0).toFixed(2)}`;
     $('kpi-solar').innerText = `${(s.solar_coverage_percent||0).toFixed(0)}%`;
-    $('kpi-solar-sub').innerText = `${(s.total_solar_used||0).toFixed(1)} kWh used`;
-    const kpiGrid = document.querySelector('#kpi-grid .kpi-value[id="kpi-grid"]') || document.querySelectorAll('.kpi-value')[2];
-    if (kpiGrid) { kpiGrid.innerText = `${(s.grid_dependency_percent||0).toFixed(0)}%`; }
-    $('kpi-grid-sub').innerText = `${(s.total_grid_used||0).toFixed(1)} kWh drawn`;
-
-    if (roi.payback_years && roi.payback_years < 100) {
-        $('kpi-payback').innerText = `${roi.payback_years.toFixed(1)} yr`;
-        $('kpi-payback').style.color = roi.payback_years < 10 ? 'var(--success-color)' : roi.payback_years < 20 ? 'var(--warning-color)' : 'var(--error-color)';
+    $('kpi-solar-sub').innerText = `${(s.total_solar_used||0).toFixed(1)} kWh`;
+    $('kpi-grid').innerText = `${(s.grid_dependency_percent||0).toFixed(0)}%`;
+    $('kpi-grid-sub').innerText = `${(s.total_grid_used||0).toFixed(1)} kWh`;
+    
+    if (roi.payback_years < 100) {
+        $('kpi-payback').innerText = `${roi.payback_years.toFixed(1)}y`;
+        $('kpi-payback').style.color = roi.payback_years < 10 ? 'var(--success-color)' : 'var(--warning-color)';
     } else { $('kpi-payback').innerText = 'N/A'; }
-    $('kpi-payback-sub').innerText = roi.best_capacity > 0 ? `${roi.best_capacity} kWh optimal` : 'Grid-only best';
+    $('kpi-payback-sub').innerText = roi.best_capacity > 0 ? `${roi.best_capacity}kWh optimal` : 'Grid-only best';
 
-    // CO2
-    const co2Factor = CO2_FACTORS[country] || 0.5;
-    const gridOnlyDemand = s.total_demand || 0;
-    const solarUsed = s.total_solar_used || 0;
-    const co2Avoided = solarUsed * co2Factor * 365;
-    $('kpi-co2').innerText = `${co2Avoided.toFixed(0)} kg/yr`;
-    $('kpi-co2-sub').innerText = `≈ ${Math.round(co2Avoided/21)} trees planted`;
+    const co2Avoided = (s.total_solar_used||0) * 0.4 * 365;
+    $('kpi-co2').innerText = `${Math.round(co2Avoided)}kg`;
+    $('kpi-co2-sub').innerText = `≈ ${Math.round(co2Avoided/21)} trees`;
 
-    // --- Decision Box ---
+    // Decision
     const statusEl = $('decision-status');
-    let status, cls;
-    if (roi.best_capacity === 0) { status='GRID OPTIMIZED'; cls='status-no'; }
-    else if (roi.is_payback_favorable) { status='INVEST'; cls='status-buy'; }
-    else { status='HOLD'; cls='status-wait'; }
-    statusEl.innerText = status;
-    statusEl.className = `decision-status ${cls}`;
-    $('decision-reason').innerText = insight.best_next_action || 'System is performing within expected parameters.';
-    $('decision-confidence').innerText = roi.is_payback_favorable && roi.payback_years < 10 ? 'High' : roi.is_payback_favorable ? 'Medium' : 'Low';
-    $('decision-savings').innerText = `+$${(p.savings_forecast.optimal_annual_savings||0).toFixed(0)}/yr`;
+    if (roi.best_capacity === 0) { statusEl.innerText = 'GRID OPTIMIZED'; statusEl.className='decision-status status-no'; }
+    else if (roi.is_payback_favorable) { statusEl.innerText = 'BUY ASSET'; statusEl.className='decision-status status-buy'; }
+    else { statusEl.innerText = 'HOLD'; statusEl.className='decision-status status-wait'; }
+    
+    $('decision-reason').innerText = advisor.professional_insight?.best_next_action || 'System balanced.';
+    $('decision-savings').innerText = `+${symbol}${(p.savings_forecast.optimal_annual_savings||0).toFixed(0)}/yr`;
     $('decision-battery').innerText = roi.best_capacity > 0 ? `${roi.best_capacity} kWh` : '—';
-    $('decision-system-cost').innerText = roi.estimated_system_cost > 0 ? `$${roi.estimated_system_cost.toFixed(0)}` : '—';
+    $('decision-system-cost').innerText = roi.estimated_system_cost > 0 ? `${symbol}${Math.round(roi.estimated_system_cost)}` : '—';
 
-    // --- Key Insights ---
-    $('key-insights-list').innerHTML = `
-        <div class="insight-item"><i class="fas fa-bolt"></i><div><strong>What's Happening</strong><p>${insight.what||'System balanced.'}</p></div></div>
-        <div class="insight-item"><i class="fas fa-search"></i><div><strong>Root Cause</strong><p>${insight.why||'Matched to demand.'}</p></div></div>
-        <div class="insight-item"><i class="fas fa-exclamation-triangle"></i><div><strong>Weakness</strong><p>${insight.weakness||'None detected.'}</p></div></div>
-        <div class="insight-item"><i class="fas fa-shield-alt"></i><div><strong>Reliability</strong><p>${advisor.reliability_note||'Standard grid-tied.'}</p></div></div>
-    `;
+    // Insights
+    $('key-insights-list').innerHTML = (advisor.action_plan || []).slice(0,3).map(a => `<div class="insight-item"><i class="fas fa-check-circle"></i><p>${a}</p></div>`).join('');
+    $('action-plan').innerHTML = (advisor.action_plan || []).map((a,i) => `<div class="action-item"><span class="action-num">${i+1}</span><span class="action-text">${a}</span></div>`).join('');
 
-    // --- Charts ---
-    const so = p.seasonal_outlook;
+    // Charts
     renderChart(data.hourly);
-    if (so && so.monthly_forecast) renderMonthlyChart(so.monthly_forecast);
+    if (p.seasonal_outlook?.monthly_forecast) renderMonthlyChart(p.seasonal_outlook.monthly_forecast);
 
-    // --- Save to History (if logged in) ---
-    if (currentUser) {
-        saveAnalysisToFirestore(data);
-    }
-
-    // --- Scenarios ---
+    // Grid Comparison
     const sc = p.scenarios;
     $('scenarios-grid').innerHTML = `
-        <div class="summary-card"><span class="summary-label">Grid Only</span><span class="summary-val">$${sc.baseline.daily_cost.toFixed(2)}/day</span></div>
-        <div class="summary-card highlight-card"><span class="summary-label">Your Setup</span><span class="summary-val">$${sc.current.daily_cost.toFixed(2)}/day</span></div>
-        <div class="summary-card" style="border-color:var(--success-color)"><span class="summary-label">Optimal</span><span class="summary-val">$${sc.optimal.daily_cost.toFixed(2)}/day</span></div>
+        <div class="summary-card"><span class="summary-label">Grid Baseline</span><span class="summary-val">${symbol}${sc.baseline.daily_cost.toFixed(2)}</span></div>
+        <div class="summary-card highlight-card"><span class="summary-label">Your Setup</span><span class="summary-val">${symbol}${sc.current.daily_cost.toFixed(2)}</span></div>
     `;
 
-    // --- Seasonal ---
+    // Seasonal
     const so = p.seasonal_outlook;
     $('seasonal-grid').innerHTML = `
-        <div class="summary-card"><span class="summary-label">High-Solar Season</span><span class="summary-val">$${so.sunny.daily_cost.toFixed(2)}/day</span><small>${so.sunny.solar_cov.toFixed(0)}% coverage</small></div>
-        <div class="summary-card"><span class="summary-label">Low-Solar Season</span><span class="summary-val">$${so.cloudy.daily_cost.toFixed(2)}/day</span><small>${so.cloudy.solar_cov.toFixed(0)}% coverage</small></div>
+        <div class="summary-card"><span class="summary-label">High Sun</span><span class="summary-val">${symbol}${so.sunny.daily_cost.toFixed(2)}</span></div>
+        <div class="summary-card"><span class="summary-label">Low Sun</span><span class="summary-val">${symbol}${so.cloudy.daily_cost.toFixed(2)}</span></div>
     `;
 
-    // --- Sensitivity ---
+    // Sensitivity
     const sen = p.sensitivity;
-    $('sensitivity-container').innerHTML = `<table class="premium-table"><thead><tr><th>Scenario</th><th>+10%</th><th>+25%</th><th>+50%</th></tr></thead><tbody>
-        <tr><td>Daily Cost</td><td>$${sen.price_10.toFixed(2)}</td><td>$${sen.price_25.toFixed(2)}</td><td>$${sen.price_50.toFixed(2)}</td></tr>
-        <tr><td>Monthly Δ</td><td>+$${((sen.price_10-s.total_grid_cost)*30).toFixed(0)}</td><td>+$${((sen.price_25-s.total_grid_cost)*30).toFixed(0)}</td><td>+$${((sen.price_50-s.total_grid_cost)*30).toFixed(0)}</td></tr>
-    </tbody></table>`;
+    $('sensitivity-container').innerHTML = `
+        <table class="premium-table">
+            <thead><tr><th>Utility Hike</th><th>+10%</th><th>+25%</th></tr></thead>
+            <tbody><tr><td>Daily Cost</td><td>${symbol}${sen.price_10.toFixed(2)}</td><td>${symbol}${sen.price_25.toFixed(2)}</td></tr></tbody>
+        </table>`;
 
-    // --- Action Plan ---
-    const plan = advisor.action_plan || [];
-    $('action-plan').innerHTML = plan.map((s,i) => `<div class="action-item"><span class="action-num">${i+1}</span><span class="action-text">${s}</span></div>`).join('');
-
-    // --- Hourly Insights ---
+    // Engineering
     const hi = p.hourly_insights;
     $('hourly-insights-grid').innerHTML = `
         <div class="summary-card"><span class="summary-label">Peak Grid Hour</span><span class="summary-val">${String(hi.max_grid_hour).padStart(2,'0')}:00</span></div>
-        <div class="summary-card"><span class="summary-label">Best Charge Window</span><span class="summary-val">${String(hi.peak_charging_hour).padStart(2,'0')}:00</span></div>
-        <div class="summary-card" style="border-color:var(--warning-color)"><span class="summary-label">Wasted Solar</span><span class="summary-val" style="color:var(--warning-color)">${(hi.total_wasted_solar_kwh||0).toFixed(1)} kWh</span></div>
+        <div class="summary-card"><span class="summary-label">Solar Surplus</span><span class="summary-val">${(hi.total_wasted_solar_kwh||0).toFixed(1)} kWh</span></div>
     `;
+    $('assumptions-content').innerHTML = `<div class="assumption-chip"><span>Tariff</span><span>${symbol}${assumptions.grid_price}/kWh</span></div>`;
 
-    // --- Model Notes ---
-    const nc = $('model-notes-container');
-    if (data.model_notes?.length) { nc.innerHTML = data.model_notes.map(n=>`<div class="model-note-item">${n}</div>`).join(''); nc.style.display='block'; }
-    else { nc.style.display='none'; }
-
-    // --- Assumptions ---
-    $('assumptions-content').innerHTML = `
-        <div class="assumption-chip"><span>Region</span><span>${country}</span></div>
-        <div class="assumption-chip"><span>Grid Tariff</span><span>$${assumptions.grid_price}/kWh</span></div>
-        <div class="assumption-chip"><span>Battery Cost</span><span>$${assumptions.battery_cost_per_kwh}/kWh</span></div>
-        <div class="assumption-chip"><span>Min SoC</span><span>${(assumptions.battery_min_soc*100).toFixed(0)}%</span></div>
-    `;
+    if (currentUser) saveAnalysisToFirestore(data);
 }
 
 // ═══════════════════════════════════════════
-// CHART
+// CHARTS
 // ═══════════════════════════════════════════
 
 function renderChart(hourly) {
     const ctx = $('energy-chart').getContext('2d');
     if (chartInstance) chartInstance.destroy();
-    const labels = Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`);
     chartInstance = new Chart(ctx, {
         type:'line',
-        data:{ labels, datasets:[
-            { label:'Demand', data:hourly.map(h=>h.demand), borderColor:'#f85149', borderWidth:2, tension:0.3, pointRadius:0 },
-            { label:'Solar Used', data:hourly.map(h=>h.solar_used), borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,0.08)', fill:true, borderWidth:2, tension:0.3, pointRadius:0 },
-            { label:'Grid Used', data:hourly.map(h=>h.grid_used), borderColor:'#58a6ff', borderDash:[5,5], borderWidth:2, tension:0.3, pointRadius:0 },
-            { label:'Battery SoC', data:hourly.map(h=>h.battery_soc_end), borderColor:'#d29922', borderWidth:2, yAxisID:'y1', tension:0.3, pointRadius:0 }
+        data:{ labels: Array.from({length:24},(_,i)=>`${String(i).padStart(2,'0')}:00`), datasets:[
+            { label:'Demand', data:hourly.map(h=>h.demand), borderColor:'#f85149', borderWidth:2, pointRadius:0, tension:0.3 },
+            { label:'Solar', data:hourly.map(h=>h.solar_used), borderColor:'#3fb950', backgroundColor:'rgba(63,185,80,0.1)', fill:true, borderWidth:2, pointRadius:0, tension:0.3 },
+            { label:'Battery', data:hourly.map(h=>h.battery_soc_end), borderColor:'#d29922', borderWidth:2, pointRadius:0, tension:0.3, yAxisID:'y1' }
         ]},
-        options:{ responsive:true, maintainAspectRatio:false, interaction:{mode:'index',intersect:false},
-            scales:{
-                y:{ beginAtZero:true, title:{display:true,text:'kWh',color:'#8b949e'}, grid:{color:'rgba(255,255,255,0.06)'}, ticks:{color:'#8b949e'} },
-                y1:{ beginAtZero:true, position:'right', title:{display:true,text:'Battery (kWh)',color:'#d29922'}, grid:{drawOnChartArea:false}, ticks:{color:'#d29922'} },
-                x:{ grid:{color:'rgba(255,255,255,0.06)'}, ticks:{color:'#8b949e',maxRotation:0,autoSkip:true,maxTicksLimit:12} }
-            },
-            plugins:{ legend:{labels:{color:'#c9d1d9',usePointStyle:true,padding:16}} }
-        }
+        options:{ responsive:true, maintainAspectRatio:false, scales:{
+            y:{ beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}, ticks:{color:'#8b949e'} },
+            y1:{ beginAtZero:true, position:'right', grid:{drawOnChartArea:false}, ticks:{color:'#d29922'} },
+            x:{ grid:{display:false}, ticks:{color:'#8b949e'} }
+        }, plugins:{ legend:{labels:{color:'#c9d1d9',boxWidth:12}} }}
     });
 }
-
-// ═══════════════════════════════════════════
-// AUTH (kept simple, no premium gating)
-// ═══════════════════════════════════════════
-
-const authModal = $('auth-modal');
-function openAuthModal() { authModal.classList.add('active'); }
-function closeAuthModal() { authModal.classList.remove('active'); }
-$('close-modal-btn')?.addEventListener('click', closeAuthModal);
-authModal?.addEventListener('click', e => { if(e.target===authModal) closeAuthModal(); });
-$('nav-account')?.addEventListener('click', e => { e.preventDefault(); if(!currentUser) openAuthModal(); });
-
-// Tab switching
-document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-        btn.classList.add('active');
-        authMode = btn.dataset.tab;
-        $('auth-submit-btn').textContent = authMode==='signin' ? 'Sign In' : 'Create Account';
-    });
-});
-
-// Email/Password
-$('auth-form')?.addEventListener('submit', e => {
-    e.preventDefault();
-    const email = $('auth-email').value, pass = $('auth-password').value;
-    const action = authMode==='signup' ? createUserWithEmailAndPassword(auth,email,pass) : signInWithEmailAndPassword(auth,email,pass);
-    action.then(r => handleAuthSuccess(r.user)).catch(err => alert(err.message));
-});
-
-// Google
-$('google-auth-btn')?.addEventListener('click', () => {
-    signInWithPopup(auth, googleProvider).then(r => handleAuthSuccess(r.user)).catch(err => alert(err.message));
-});
-
-async function handleAuthSuccess(user) {
-    currentUser = user;
-    closeAuthModal();
-    await setDoc(doc(dbFs,"users",user.uid), { email:user.email, lastLogin:new Date().toISOString() }, { merge:true });
-    updateAuthUI();
-}
-
-function handleSignOut() {
-    signOut(auth).then(() => { currentUser=null; updateAuthUI(); });
-}
-
-function updateAuthUI() {
-    const profileNav = $('user-profile-nav');
-    const emailDisp = $('user-email-display');
-    const authBtn = $('auth-btn-nav');
-    const authText = $('auth-btn-text-nav');
-    const authIcon = $('auth-icon-nav');
-
-    if (currentUser) {
-        if(profileNav) profileNav.style.display='block';
-        if(emailDisp) emailDisp.innerText = currentUser.email;
-        if(authText) authText.innerText = 'Sign Out';
-        if(authIcon) authIcon.className = 'fas fa-sign-out-alt';
-        if(authBtn) authBtn.onclick = e => { e.preventDefault(); handleSignOut(); };
-    } else {
-        if(profileNav) profileNav.style.display='none';
-        if(authText) authText.innerText = 'Sign In';
-        if(authIcon) authIcon.className = 'fas fa-sign-in-alt';
-        if(authBtn) authBtn.onclick = e => { e.preventDefault(); openAuthModal(); };
-    }
-}
-
-onAuthStateChanged(auth, user => { currentUser = user || null; updateAuthUI(); });
-
-// ═══════════════════════════════════════════
-// MISC
-// ═══════════════════════════════════════════
-
-$('download-report-btn')?.addEventListener('click', () => window.print());
-$('reset-btn')?.addEventListener('click', () => { $('results-area').style.display='none'; window.scrollTo({top:0,behavior:'smooth'}); });
-
-// ═══════════════════════════════════════════
-// NEW FEATURES IMPLEMENTATION
-// ═══════════════════════════════════════════
-
-function $(id) { return document.getElementById(id); }
-function parseCommaList(str) { return str.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v)); }
-
-// Restore Mobile sidebar toggle logic
-(function() {
-    const hamburger = $('hamburger-btn');
-    const backdrop = $('sidebar-backdrop');
-    const sidebar = $('app-sidebar');
-    if (hamburger) hamburger.onclick = () => { sidebar.classList.toggle('open'); backdrop.classList.toggle('active'); };
-    if (backdrop) backdrop.onclick = () => { sidebar.classList.remove('open'); backdrop.classList.remove('active'); };
-})();
 
 function renderMonthlyChart(monthlyData) {
     const ctx = $('monthly-forecast-chart').getContext('2d');
     if (monthlyChartInstance) monthlyChartInstance.destroy();
-    
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    
     monthlyChartInstance = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: months,
-            datasets: [
-                {
-                    label: 'Projected Monthly Cost',
-                    data: monthlyData.map(d => d.projected_cost),
-                    backgroundColor: 'rgba(88, 166, 255, 0.4)',
-                    borderColor: '#58a6ff',
-                    borderWidth: 1,
-                    borderRadius: 5
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'Cost ($)', color: '#8b949e' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#8b949e' } },
-                x: { grid: { display: false }, ticks: { color: '#8b949e' } }
-            },
-            plugins: {
-                legend: { display: false }
-            }
-        }
+        type:'bar',
+        data:{ labels:["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"], datasets:[
+            { label:'Cost', data:monthlyData.map(d=>d.projected_cost), backgroundColor:'rgba(88,166,255,0.4)', borderRadius:4 }
+        ]},
+        options:{ responsive:true, maintainAspectRatio:false, scales:{
+            y:{ beginAtZero:true, grid:{color:'rgba(255,255,255,0.05)'}, ticks:{color:'#8b949e'} },
+            x:{ grid:{display:false}, ticks:{color:'#8b949e'} }
+        }, plugins:{ legend:{display:false} }}
     });
 }
 
+// ═══════════════════════════════════════════
+// HISTORY & AUTH
+// ═══════════════════════════════════════════
+
 async function saveAnalysisToFirestore(data) {
-    if (!currentUser) return;
     try {
-        const country = $('country').value;
-        const solar = $('solar-kw').value;
-        const batt = $('battery-kwh').value;
-        
         await addDoc(collection(dbFs, "users", currentUser.uid, "history"), {
             timestamp: new Date().toISOString(),
-            label: `${country} — ${solar}kW Solar / ${batt}kWh Battery`,
-            country,
-            solar_kw: solar,
-            battery_kwh: batt,
-            summary: data.summary,
-            premium_insights: data.premium_insights,
-            assumptions: data.assumptions,
-            hourly: data.hourly,
-            advisor: data.advisor
+            label: `${$('country').value} — ${$('solar-kw').value}kW / ${$('battery-kwh').value}kWh`,
+            data: data,
+            inputs: { country:$('country').value, solar:$('solar-kw').value, battery:$('battery-kwh').value, climate:$('climate').value }
         });
-        console.log("Analysis saved to history.");
-    } catch (e) {
-        console.error("Error saving analysis:", e);
-    }
+    } catch(e) {}
 }
 
 async function loadHistory() {
     const list = $('history-list');
-    list.innerHTML = '<div class="loader-container"><div class="spinner"></div></div>';
-    
-    if (!currentUser) {
-        list.innerHTML = '<div class="glass-card span-2" style="text-align:center;"><p>Sign in to see your simulation history.</p><button class="primary-btn mt-1" onclick="openAuthModal()">Sign In</button></div>';
-        return;
-    }
+    list.innerHTML = '<div class="spinner"></div>';
+    if (!currentUser) { list.innerHTML = '<p class="mt-2" style="text-align:center;">Please sign in to view history.</p>'; return; }
 
     try {
-        const q = query(collection(dbFs, "users", currentUser.uid, "history"), orderBy("timestamp", "desc"));
+        const q = query(collection(dbFs, "users", currentUser.uid, "history"));
         const snapshot = await getDocs(q);
+        if (snapshot.empty) { list.innerHTML = '<p class="mt-2" style="text-align:center;">No saved analyses found.</p>'; return; }
         
-        if (snapshot.empty) {
-            list.innerHTML = '<div class="glass-card span-2" style="text-align:center;"><p>No simulations saved yet. Run your first analysis to see it here!</p></div>';
-            return;
-        }
-
         list.innerHTML = '';
         snapshot.forEach(docSnap => {
             const h = docSnap.data();
-            const date = new Date(h.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-            
             const card = document.createElement('div');
             card.className = 'glass-card';
             card.innerHTML = `
-                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
-                    <div>
-                        <h4 style="margin-bottom:0.25rem;">${h.label}</h4>
-                        <small style="color:var(--text-secondary);">${date}</small>
-                    </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <strong>${h.label}</strong>
                     <button class="delete-btn" data-id="${docSnap.id}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer;"><i class="fas fa-trash"></i></button>
                 </div>
-                <div class="kpi-body" style="flex-direction:row; gap:1rem; margin-bottom:1rem;">
-                    <div><small>Solar</small><br><strong>${h.summary.solar_coverage_percent.toFixed(0)}%</strong></div>
-                    <div><small>Payback</small><br><strong>${h.premium_insights.smart_recommendation.payback_years.toFixed(1)}y</strong></div>
-                    <div><small>Savings</small><br><strong style="color:var(--success-color);">+$${h.premium_insights.savings_forecast.optimal_annual_savings.toFixed(0)}</strong></div>
-                </div>
-                <button class="secondary-btn full-width view-past-btn" data-id="${docSnap.id}">View Analysis</button>
+                <small style="color:var(--text-secondary);">${new Date(h.timestamp).toLocaleDateString()}</small>
+                <button class="secondary-btn full-width mt-1 view-past-btn" data-id="${docSnap.id}">View Results</button>
             `;
             list.appendChild(card);
         });
-
-        // Attach listeners
-        document.querySelectorAll('.view-past-btn').forEach(btn => {
-            btn.onclick = () => viewPastAnalysis(btn.dataset.id);
-        });
-        document.querySelectorAll('.delete-btn').forEach(btn => {
-            btn.onclick = (e) => { e.stopPropagation(); deleteAnalysis(btn.dataset.id); };
-        });
-
-    } catch (e) {
-        list.innerHTML = `<div class="error-msg">Error loading history: ${e.message}</div>`;
-    }
+        
+        document.querySelectorAll('.view-past-btn').forEach(btn => btn.onclick = () => viewPast(btn.dataset.id));
+        document.querySelectorAll('.delete-btn').forEach(btn => btn.onclick = (e) => { e.stopPropagation(); deleteHistory(btn.dataset.id); });
+    } catch(e) { list.innerHTML = '<p>Error loading history.</p>'; }
 }
 
-async function viewPastAnalysis(id) {
-    try {
-        const docSnap = await getDoc(doc(dbFs, "users", currentUser.uid, "history", id));
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            renderResults(data);
-            showSection('results');
+async function viewPast(id) {
+    const docSnap = await getDoc(doc(dbFs, "users", currentUser.uid, "history", id));
+    if (docSnap.exists()) {
+        const h = docSnap.data();
+        if (h.inputs) {
+            $('country').value = h.inputs.country;
+            $('solar-kw').value = h.inputs.solar;
+            $('battery-kwh').value = h.inputs.battery;
+            $('climate').value = h.inputs.climate;
         }
-    } catch (e) {
-        alert("Error loading specific analysis.");
+        renderResults(h.data);
+        showSection('results');
     }
 }
 
-async function deleteAnalysis(id) {
-    if (!confirm("Are you sure you want to delete this analysis?")) return;
-    try {
-        await deleteDoc(doc(dbFs, "users", currentUser.uid, "history", id));
-        loadHistory();
-    } catch (e) {
-        alert("Error deleting analysis.");
-    }
+async function deleteHistory(id) {
+    if (!confirm('Delete this record?')) return;
+    await deleteDoc(doc(dbFs, "users", currentUser.uid, "history", id));
+    loadHistory();
 }
+
+// --- Auth Boilers ---
+function updateAuthUI() {
+    const isUser = !!currentUser;
+    $('user-profile-nav').style.display = isUser ? 'block' : 'none';
+    if (isUser) $('user-email-display').innerText = currentUser.email;
+    $('auth-btn-text-nav').innerText = isUser ? 'Sign Out' : 'Sign In';
+    $('auth-icon-nav').className = isUser ? 'fas fa-sign-out-alt' : 'fas fa-sign-in-alt';
+    $('auth-btn-nav').onclick = (e) => { e.preventDefault(); isUser ? handleSignOut() : openAuthModal(); };
+}
+
+onAuthStateChanged(auth, user => { 
+    currentUser = user; 
+    updateAuthUI(); 
+    if (user) {
+        getDoc(doc(dbFs, "users", user.uid)).then(d => {
+            if (d.exists() && d.data().settings) {
+                userSettings = d.data().settings;
+                $('setting-currency').value = userSettings.currency;
+                document.querySelectorAll('.currency-symbol').forEach(el => el.innerText = getCurrencySymbol());
+            }
+        });
+    }
+});
+
+function handleSignOut() { signOut(auth).then(() => { currentUser=null; updateAuthUI(); }); }
+function openAuthModal() { authModal.classList.add('active'); }
+function closeAuthModal() { authModal.classList.remove('active'); }
+$('close-modal-btn')?.onclick = closeAuthModal;
+$('auth-form')?.addEventListener('submit', e => {
+    e.preventDefault();
+    const email = $('auth-email').value, pass = $('auth-password').value;
+    const action = authMode === 'signup' ? createUserWithEmailAndPassword(auth,email,pass) : signInWithEmailAndPassword(auth,email,pass);
+    action.then(r => handleAuthSuccess(r.user)).catch(err => alert(err.message));
+});
+$('google-auth-btn')?.onclick = () => signInWithPopup(auth, googleProvider).then(r => handleAuthSuccess(r.user));
+async function handleAuthSuccess(u) { currentUser=u; closeAuthModal(); await setDoc(doc(dbFs,"users",u.uid),{email:u.email},{merge:true}); updateAuthUI(); }
+document.querySelectorAll('.tab-btn').forEach(btn => btn.onclick = () => {
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active'); authMode=btn.dataset.tab;
+    $('auth-submit-btn').innerText = authMode==='signin' ? 'Sign In' : 'Sign Up';
+});
+
+// Misc
+$('reset-btn')?.onclick = () => { showSection('analyzer'); window.scrollTo({top:0}); };
+$('download-report-btn')?.onclick = () => window.print();

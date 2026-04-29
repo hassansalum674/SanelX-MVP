@@ -1590,3 +1590,105 @@ textarea { resize: vertical; min-height: 70px; font-family: 'Fira Code', monospa
     .main-content { margin-left: 0; padding: 0; }
     .glass-card { break-inside: avoid; }
 }
+
+/* ═══════════════════════════════════════════
+   DASHBOARD v2.1 REFINEMENTS
+   ═══════════════════════════════════════════ */
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+}
+
+.intel-column {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.span-2 { grid-column: span 2; }
+
+/* Chart Tabs */
+.chart-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    padding: 0.25rem;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+    width: fit-content;
+}
+
+.chart-tab-btn {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.chart-tab-btn.active {
+    background: var(--card-bg);
+    color: var(--primary-color);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.chart-tab-btn:hover:not(.active) {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.05);
+}
+
+/* Compact Action Plan */
+.action-plan.compact {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.action-plan.compact .action-item {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.05);
+    padding: 0.75rem;
+    font-size: 0.85rem;
+}
+
+.action-plan.compact .action-num {
+    min-width: 20px;
+    height: 20px;
+    font-size: 0.75rem;
+}
+
+/* Engineering Toggle Rotate */
+#toggle-engineering i.fa-chevron-down {
+    transition: transform 0.3s;
+}
+
+/* Responsive Dashboard */
+@media (max-width: 1200px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+    .span-2 { grid-column: span 1; }
+    .intel-column { order: 2; }
+}
+
+@media (max-width: 768px) {
+    .kpi-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+/* Status Colors for Dashboard v2.1 */
+.status-buy { background: rgba(63,185,80,0.15); color: #3fb950; border: 1px solid rgba(63,185,80,0.3); }
+.status-wait { background: rgba(210,153,34,0.15); color: #d29922; border: 1px solid rgba(210,153,34,0.3); }
+.status-no { background: rgba(248,81,73,0.15); color: #f85149; border: 1px solid rgba(248,81,73,0.3); }
+
+.highlight-card {
+    border: 1px solid rgba(88, 166, 255, 0.3);
+    background: linear-gradient(145deg, rgba(13, 17, 23, 0.9), rgba(88, 166, 255, 0.05));
+}
