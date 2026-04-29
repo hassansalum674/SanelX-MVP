@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════
-// SYNEX v2.1 — Compact Dashboard, History & Currency Fixes
+// SYNEX v2.3 — Advanced Logic & Interoperability
 // ═══════════════════════════════════════════════════
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
@@ -50,6 +50,12 @@ const LOAD_PROFILES = {
     residential_night: [0.5,0.4,0.3,0.3,0.3,0.4,0.5,0.6,0.7,0.6,0.5,0.5,0.5,0.5,0.5,0.6,1.0,2.0,3.5,4.5,4.0,3.5,2.5,1.0],
     office:            [0.2,0.2,0.2,0.2,0.2,0.3,0.5,1.5,3.0,3.5,3.5,3.0,2.5,3.0,3.5,3.5,3.0,1.5,0.5,0.3,0.2,0.2,0.2,0.2],
     industrial:        [1.5,1.5,1.5,1.5,1.5,2.0,3.0,4.0,4.5,4.5,4.5,4.0,3.5,4.0,4.5,4.5,4.0,3.0,2.0,1.5,1.5,1.5,1.5,1.5]
+};
+const HARDWARE_SPECS = {
+    tesla_powerwall_2: { capacity: 13.5 },
+    byd_battery_box_lv: { capacity: 15.4 },
+    pylontech_us3000c: { capacity: 3.55 },
+    enphase_iq_10: { capacity: 10.08 }
 };
 let activeProfile = 'residential_day';
 
@@ -103,6 +109,23 @@ document.querySelectorAll('.profile-tile').forEach(tile => {
     });
 });
 
+// Strategy Selector
+$('strategy-mode')?.addEventListener('change', (e) => {
+    const mode = e.target.value;
+    $('strategy-config-shaving').style.display = mode === 'peak_shaving' ? 'block' : 'none';
+    $('strategy-config-tou').style.display = mode === 'tou_arbitrage' ? 'block' : 'none';
+});
+
+// Hardware Selector
+$('battery-model')?.addEventListener('change', (e) => {
+    const model = e.target.value;
+    if (HARDWARE_SPECS[model]) {
+        $('battery-kwh').value = HARDWARE_SPECS[model].capacity;
+        $('battery-kwh').style.borderColor = 'var(--success-color)';
+        setTimeout(() => { $('battery-kwh').style.borderColor = ''; }, 1000);
+    }
+});
+
 // Chart Tabs
 document.querySelectorAll('.chart-tab-btn').forEach(btn => {
     btn.onclick = () => {
@@ -126,7 +149,7 @@ $('toggle-engineering')?.addEventListener('click', () => {
 // ANALYSIS ENGINE
 // ═══════════════════════════════════════════
 
-$('analyze-form').addEventListener('submit', async (e) => {
+$('analyze-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = $('analyze-btn');
     const spinner = $('analyze-spinner');
@@ -140,7 +163,7 @@ $('analyze-form').addEventListener('submit', async (e) => {
 
     try {
         let demand = activeProfile === 'custom' ? parseCommaList($('hourly-demand').value) : LOAD_PROFILES[activeProfile];
-        if (demand.length !== 24) throw new Error('Load profile must have 24 values.');
+        if (!demand || demand.length !== 24) throw new Error('Load profile must have 24 values.');
 
         const payload = {
             solar_kw: parseFloat($('solar-kw').value) || 0,
@@ -267,6 +290,30 @@ function renderResults(data) {
     if (currentUser) saveAnalysisToFirestore(data);
 }
 
+// --- Logic Helpers ---
+function getInteropScore(batt, inv) {
+    if (batt === 'generic_lifepo4' || inv === 'generic') return 85;
+    if (inv === 'victron_multiplus_ii_5k' && batt === 'pylontech_us3000c') return 98;
+    if (inv === 'huawei_sun2000_6ktl' && batt === 'tesla_powerwall_2') return 70;
+    return 90;
+}
+
+function getSmartAdvice(data, strategy) {
+    const advice = [];
+    const h = data.hourly;
+    const peakHour = h.reduce((prev, curr) => (prev.demand > curr.demand) ? prev : curr).hour;
+    if (strategy === 'self_consumption') {
+        advice.push(`Shift heavy loads to ${String(peakHour).padStart(2,'0')}:00 to maximize direct solar.`);
+    }
+    if (data.summary.total_wasted_solar > 2) {
+        advice.push("Significant solar waste detected. Consider larger battery or EV charging.");
+    }
+    if ($('weather-outlook').value === 'stormy') {
+        advice.push("Stormy weather reserve (60%) active to ensure backup.");
+    }
+    return advice;
+}
+
 // ═══════════════════════════════════════════
 // CHARTS
 // ═══════════════════════════════════════════
@@ -315,12 +362,9 @@ async function saveAnalysisToFirestore(data) {
             label: `${$('country').value} — ${$('solar-kw').value}kW / ${$('battery-kwh').value}kWh`,
             data: data,
             inputs: { 
-                country:$('country').value, 
-                solar:$('solar-kw').value, 
-                battery:$('battery-kwh').value, 
-                climate:$('climate').value,
-                battery_model: $('battery-model').value,
-                inverter_model: $('inverter-model').value
+                country:$('country').value, solar:$('solar-kw').value, battery:$('battery-kwh').value, climate:$('climate').value,
+                battery_model: $('battery-model').value, inverter_model: $('inverter-model').value,
+                strategy_mode: $('strategy-mode').value, weather_outlook: $('weather-outlook').value
             }
         });
     } catch(e) {}
@@ -330,12 +374,10 @@ async function loadHistory() {
     const list = $('history-list');
     list.innerHTML = '<div class="spinner"></div>';
     if (!currentUser) { list.innerHTML = '<p class="mt-2" style="text-align:center;">Please sign in to view history.</p>'; return; }
-
     try {
         const q = query(collection(dbFs, "users", currentUser.uid, "history"));
         const snapshot = await getDocs(q);
         if (snapshot.empty) { list.innerHTML = '<p class="mt-2" style="text-align:center;">No saved analyses found.</p>'; return; }
-        
         list.innerHTML = '';
         snapshot.forEach(docSnap => {
             const h = docSnap.data();
@@ -351,7 +393,6 @@ async function loadHistory() {
             `;
             list.appendChild(card);
         });
-        
         document.querySelectorAll('.view-past-btn').forEach(btn => btn.onclick = () => viewPast(btn.dataset.id));
         document.querySelectorAll('.delete-btn').forEach(btn => btn.onclick = (e) => { e.stopPropagation(); deleteHistory(btn.dataset.id); });
     } catch(e) { list.innerHTML = '<p>Error loading history.</p>'; }
@@ -362,15 +403,14 @@ async function viewPast(id) {
     if (docSnap.exists()) {
         const h = docSnap.data();
         if (h.inputs) {
-            $('country').value = h.inputs.country;
-            $('solar-kw').value = h.inputs.solar;
-            $('battery-kwh').value = h.inputs.battery;
-            $('climate').value = h.inputs.climate;
+            $('country').value = h.inputs.country; $('solar-kw').value = h.inputs.solar;
+            $('battery-kwh').value = h.inputs.battery; $('climate').value = h.inputs.climate;
             if (h.inputs.battery_model) $('battery-model').value = h.inputs.battery_model;
             if (h.inputs.inverter_model) $('inverter-model').value = h.inputs.inverter_model;
+            if (h.inputs.strategy_mode) $('strategy-mode').value = h.inputs.strategy_mode;
+            if (h.inputs.weather_outlook) $('weather-outlook').value = h.inputs.weather_outlook;
         }
-        renderResults(h.data);
-        showSection('results');
+        renderResults(h.data); showSection('results');
     }
 }
 
@@ -391,8 +431,7 @@ function updateAuthUI() {
 }
 
 onAuthStateChanged(auth, user => { 
-    currentUser = user; 
-    updateAuthUI(); 
+    currentUser = user; updateAuthUI(); 
     if (user) {
         getDoc(doc(dbFs, "users", user.uid)).then(d => {
             if (d.exists() && d.data().settings) {
@@ -405,8 +444,8 @@ onAuthStateChanged(auth, user => {
 });
 
 function handleSignOut() { signOut(auth).then(() => { currentUser=null; updateAuthUI(); }); }
-function openAuthModal() { authModal.classList.add('active'); }
-function closeAuthModal() { authModal.classList.remove('active'); }
+function openAuthModal() { $('auth-modal').classList.add('active'); }
+function closeAuthModal() { $('auth-modal').classList.remove('active'); }
 $('close-modal-btn')?.onclick = closeAuthModal;
 $('auth-form')?.addEventListener('submit', e => {
     e.preventDefault();
@@ -425,76 +464,3 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.onclick = () => {
 // Misc
 $('reset-btn')?.onclick = () => { showSection('analyzer'); window.scrollTo({top:0}); };
 $('download-report-btn')?.onclick = () => window.print();
-
-// ═══════════════════════════════════════════
-// HARDWARE INTEROP HELPERS
-// ═══════════════════════════════════════════
-
-const HARDWARE_SPECS = {
-    tesla_powerwall_2: { capacity: 13.5 },
-    byd_battery_box_lv: { capacity: 15.4 },
-    pylontech_us3000c: { capacity: 3.55 }
-};
-
-$('battery-model')?.addEventListener('change', (e) => {
-    const model = e.target.value;
-    if (HARDWARE_SPECS[model]) {
-        $('battery-kwh').value = HARDWARE_SPECS[model].capacity;
-        // Visual feedback
-        $('battery-kwh').style.borderColor = 'var(--success-color)';
-        setTimeout(() => { $('battery-kwh').style.borderColor = ''; }, 1000);
-    }
-});
-
-// Interop Score Calculation (Frontend visualization)
-function getInteropScore(batt, inv) {
-    if (batt === 'generic_lifepo4' || inv === 'generic') return 85;
-    // Specific pairings
-    if (inv === 'victron_multiplus_ii_5k' && batt === 'pylontech_us3000c') return 98; // Gold standard
-    if (inv === 'huawei_sun2000_6ktl' && batt === 'tesla_powerwall_2') return 70; // Requires bridge
-    return 90;
-}
-
-// ═══════════════════════════════════════════
-// STRATEGY & ADVICE LOGIC
-// ═══════════════════════════════════════════
-
-$('strategy-mode')?.addEventListener('change', (e) => {
-    const mode = e.target.value;
-    $('strategy-config-shaving').style.display = mode === 'peak_shaving' ? 'block' : 'none';
-    $('strategy-config-tou').style.display = mode === 'tou_arbitrage' ? 'block' : 'none';
-});
-
-// Expanded Hardware Specs for autofill
-const EXTENDED_HARDWARE = {
-    tesla_powerwall_2: { capacity: 13.5 },
-    byd_battery_box_lv: { capacity: 15.4 },
-    pylontech_us3000c: { capacity: 3.55 },
-    enphase_iq_10: { capacity: 10.08 }
-};
-
-function getSmartAdvice(data, strategy) {
-    const advice = [];
-    const h = data.hourly;
-    const peakHour = h.reduce((prev, current) => (prev.demand > current.demand) ? prev : current).hour;
-    
-    if (strategy === 'self_consumption') {
-        advice.push(`Shift heavy loads (like laundry) to ${String(peakHour).padStart(2,'0')}:00 to maximize direct solar use.`);
-    }
-    
-    if (data.summary.total_wasted_solar > 2) {
-        advice.push("You have significant solar waste. Consider adding more battery capacity or an EV charger.");
-    }
-
-    if ($('weather-outlook').value === 'stormy') {
-        advice.push("Stormy weather detected. We've automatically increased your battery reserve to 60%.");
-    }
-
-    return advice;
-}
-
-// Override existing event to include strategy
-$('analyze-form')?.addEventListener('submit', async (e) => {
-    // Note: The previous listener is already there, but we want to make sure these are passed.
-    // In a real app we'd refactor the submit handler. For this MVP, we'll ensure payload includes them.
-});
