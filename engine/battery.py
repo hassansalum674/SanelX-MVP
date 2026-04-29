@@ -8,10 +8,14 @@ class Battery:
                  capacity_kwh: float, 
                  initial_charge_kwh: float, 
                  min_soc_kwh: float = 0.0,
-                 round_trip_efficiency: float = 0.9):
+                 round_trip_efficiency: float = 0.9,
+                 max_charge_rate_kw: float = 5.0,
+                 max_discharge_rate_kw: float = 5.0):
         self.capacity = capacity_kwh
         self.current_charge = min(initial_charge_kwh, capacity_kwh)
         self.min_soc = min_soc_kwh
+        self.max_charge_rate = max_charge_rate_kw
+        self.max_discharge_rate = max_discharge_rate_kw
         self.throughput_kwh = 0.0
         
         # Split efficiency equally between charging and discharging
@@ -27,6 +31,9 @@ class Battery:
         """
         if energy_kwh <= 0:
             return 0.0
+            
+        # Respect hardware max charge rate
+        energy_kwh = min(energy_kwh, self.max_charge_rate)
             
         space_available = self.capacity - self.current_charge
         if space_available <= 0:
@@ -54,6 +61,9 @@ class Battery:
         """
         if demand_kwh <= 0:
             return 0.0
+
+        # Respect hardware max discharge rate
+        demand_kwh = min(demand_kwh, self.max_discharge_rate)
             
         available_internal = self.current_charge - self.min_soc
         if available_internal <= 0:

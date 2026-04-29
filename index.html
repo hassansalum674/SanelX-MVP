@@ -148,6 +148,46 @@
                                 </div>
                             </div>
 
+                            <!-- NEW: Strategy & Weather Intelligence -->
+                            <div class="input-grid cols-2" style="margin-top:1rem;">
+                                <div class="input-group">
+                                    <label for="strategy-mode"><i class="fas fa-brain"></i> Control Strategy</label>
+                                    <select id="strategy-mode">
+                                        <option value="self_consumption">Self-Consumption (Max Savings)</option>
+                                        <option value="peak_shaving">Peak Shaving (Industrial/Business)</option>
+                                        <option value="tou_arbitrage">TOU Arbitrage (Time of Use)</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label for="weather-outlook"><i class="fas fa-cloud-sun"></i> Weather Outlook</label>
+                                    <select id="weather-outlook">
+                                        <option value="sunny">Sunny (Standard)</option>
+                                        <option value="cloudy">Cloudy (40% Reserve)</option>
+                                        <option value="stormy">Stormy (60% Reserve)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Strategy Specific Config (Dynamic) -->
+                            <div id="strategy-config-shaving" class="input-grid cols-1" style="display:none; margin-top:1rem; padding:1rem; background:rgba(255,255,255,0.03); border-radius:8px;">
+                                <div class="input-group">
+                                    <label for="peak-threshold">Grid Draw Threshold (kW)</label>
+                                    <input type="number" id="peak-threshold" step="0.5" value="5.0">
+                                    <small style="color:var(--text-secondary);">Battery will discharge to keep grid draw below this limit.</small>
+                                </div>
+                            </div>
+
+                            <div id="strategy-config-tou" class="input-grid cols-2" style="display:none; margin-top:1rem; padding:1rem; background:rgba(255,255,255,0.03); border-radius:8px;">
+                                <div class="input-group">
+                                    <label>Peak Hours Start</label>
+                                    <input type="number" id="tou-start" min="0" max="23" value="18">
+                                </div>
+                                <div class="input-group">
+                                    <label>Peak Hours End</label>
+                                    <input type="number" id="tou-end" min="0" max="23" value="22">
+                                </div>
+                                <div class="span-2"><small style="color:var(--text-secondary);">Battery will charge from grid 00:00-05:00 and discharge during these peak hours.</small></div>
+                            </div>
                             <div class="input-group">
                                 <label>Load Profile Template</label>
                                 <div class="profile-tiles" id="profile-tiles">

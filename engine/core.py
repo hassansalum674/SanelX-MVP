@@ -20,14 +20,22 @@ def run_synex_simulation(input_data: Dict[str, Any]) -> Dict[str, Any]:
     batt_specs = get_hardware_specs("batteries", batt_model)
     inv_specs = get_hardware_specs("inverters", inv_model)
 
+    # Weather-aware reserve logic
+    weather = input_data.get("weather_outlook", "sunny")
+    base_reserve = 1.0 - batt_specs["dod"]
+    if weather == "cloudy": base_reserve = max(base_reserve, 0.4)
+    if weather == "stormy": base_reserve = max(base_reserve, 0.6)
+
     ASSUMPTIONS = {
         "install_fee": float(cost_params.get("install_fee", 1500.0)),
         "solar_cost_kw": float(cost_params.get("solar_cost_kw", 1000.0)),
         "battery_cost_per_kwh": float(cost_params.get("battery_cost_kwh", 300.0)),
         "battery_wear_cost_per_kwh": 0.05,
         "grid_price": float(input_data.get("grid_price", 0.15)),
-        "battery_min_soc": 1.0 - batt_specs["dod"], # Use hardware-specific DoD
-        "battery_round_trip_efficiency": batt_specs["round_trip_efficiency"], # Use hardware-specific efficiency
+        "battery_min_soc": base_reserve, 
+        "battery_round_trip_efficiency": batt_specs["round_trip_efficiency"],
+        "max_charge_rate_kw": batt_specs.get("max_charge_rate_kw", 5.0),
+        "max_discharge_rate_kw": batt_specs.get("max_discharge_rate_kw", 5.0),
         "inverter_efficiency": inv_specs["efficiency"],
         "maint_pct": float(cost_params.get("maint_pct", 1.0))
     }
@@ -57,8 +65,14 @@ def run_synex_simulation(input_data: Dict[str, Any]) -> Dict[str, Any]:
         "hourly_demand_kwh": input_data.get("hourly_demand", []),
         "hourly_solar_profile": scaled_solar,
         "grid_price_per_kwh": ASSUMPTIONS["grid_price"],
-        "battery_min_soc_kwh": ASSUMPTIONS["battery_min_soc"] * input_data.get("battery_kwh", 0), # Scale % to kWh
+        "battery_min_soc_kwh": ASSUMPTIONS["battery_min_soc"] * input_data.get("battery_kwh", 0),
         "battery_round_trip_efficiency": ASSUMPTIONS["battery_round_trip_efficiency"],
+        "max_charge_rate_kw": ASSUMPTIONS["max_charge_rate_kw"],
+        "max_discharge_rate_kw": ASSUMPTIONS["max_discharge_rate_kw"],
+        "strategy_mode": input_data.get("strategy_mode", "self_consumption"),
+        "peak_shaving_threshold_kw": input_data.get("peak_shaving_threshold_kw", 5.0),
+        "tou_peak_start": input_data.get("tou_peak_start", 18),
+        "tou_peak_end": input_data.get("tou_peak_end", 22),
         "inverter_efficiency": ASSUMPTIONS["inverter_efficiency"],
         "time_step_hours": 1
     }

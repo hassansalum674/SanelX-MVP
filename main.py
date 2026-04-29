@@ -107,6 +107,12 @@ class AnalyzeRequest(BaseModel):
     # NEW: Hardware Interoperability
     battery_model: Optional[str] = "generic_lifepo4"
     inverter_model: Optional[str] = "generic"
+    # NEW: Advanced Logic Strategies
+    strategy_mode: Optional[str] = "self_consumption"
+    peak_shaving_threshold_kw: Optional[float] = 5.0
+    tou_peak_start: Optional[int] = 18
+    tou_peak_end: Optional[int] = 22
+    weather_outlook: Optional[str] = "sunny" # influencing reserve
 
 # --- Endpoints ---
 
