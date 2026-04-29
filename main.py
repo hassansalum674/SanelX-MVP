@@ -104,6 +104,9 @@ class AnalyzeRequest(BaseModel):
     cost_params: Optional[CostParams] = None
     hourly_demand: List[float]
     hourly_solar_profile: List[float]
+    # NEW: Hardware Interoperability
+    battery_model: Optional[str] = "generic_lifepo4"
+    inverter_model: Optional[str] = "generic"
 
 # --- Endpoints ---
 

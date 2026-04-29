@@ -4,6 +4,7 @@ from .summary import calculate_summary
 from .recommendations import generate_recommendations
 from .optimizer import compare_battery_sizes
 from .advisor import SmartAdvisor
+from .hardware_db import get_hardware_specs
 from typing import Dict, Any
 
 def run_synex_simulation(input_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -13,14 +14,21 @@ def run_synex_simulation(input_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     # 0. Hardware & Economic Inputs
     cost_params = input_data.get("cost_params") or {}
+    # 0.5 Hardware Interoperability Modeling
+    batt_model = input_data.get("battery_model", "generic_lifepo4")
+    inv_model = input_data.get("inverter_model", "generic")
+    batt_specs = get_hardware_specs("batteries", batt_model)
+    inv_specs = get_hardware_specs("inverters", inv_model)
+
     ASSUMPTIONS = {
         "install_fee": float(cost_params.get("install_fee", 1500.0)),
         "solar_cost_kw": float(cost_params.get("solar_cost_kw", 1000.0)),
         "battery_cost_per_kwh": float(cost_params.get("battery_cost_kwh", 300.0)),
         "battery_wear_cost_per_kwh": 0.05,
         "grid_price": float(input_data.get("grid_price", 0.15)),
-        "battery_efficiency": float(input_data.get("battery_efficiency", 0.9)),
-        "battery_min_soc": float(input_data.get("battery_min_soc", 0.0)),
+        "battery_min_soc": 1.0 - batt_specs["dod"], # Use hardware-specific DoD
+        "battery_round_trip_efficiency": batt_specs["round_trip_efficiency"], # Use hardware-specific efficiency
+        "inverter_efficiency": inv_specs["efficiency"],
         "maint_pct": float(cost_params.get("maint_pct", 1.0))
     }
 
@@ -49,8 +57,9 @@ def run_synex_simulation(input_data: Dict[str, Any]) -> Dict[str, Any]:
         "hourly_demand_kwh": input_data.get("hourly_demand", []),
         "hourly_solar_profile": scaled_solar,
         "grid_price_per_kwh": ASSUMPTIONS["grid_price"],
-        "battery_min_soc_kwh": ASSUMPTIONS["battery_min_soc"],
-        "battery_round_trip_efficiency": ASSUMPTIONS["battery_efficiency"],
+        "battery_min_soc_kwh": ASSUMPTIONS["battery_min_soc"] * input_data.get("battery_kwh", 0), # Scale % to kWh
+        "battery_round_trip_efficiency": ASSUMPTIONS["battery_round_trip_efficiency"],
+        "inverter_efficiency": ASSUMPTIONS["inverter_efficiency"],
         "time_step_hours": 1
     }
 

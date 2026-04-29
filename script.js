@@ -154,7 +154,9 @@ $('analyze-form').addEventListener('submit', async (e) => {
                 maint_pct: 1.0
             },
             hourly_demand: demand,
-            hourly_solar_profile: SOLAR_PROFILES[$('climate').value] || SOLAR_PROFILES.high
+            hourly_solar_profile: SOLAR_PROFILES[$('climate').value] || SOLAR_PROFILES.high,
+            battery_model: $('battery-model').value,
+            inverter_model: $('inverter-model').value
         };
 
         const res = await fetch(ANALYZE_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
@@ -208,6 +210,11 @@ function renderResults(data) {
     else { statusEl.innerText = 'HOLD'; statusEl.className='decision-status status-wait'; }
     
     $('decision-reason').innerText = advisor.professional_insight?.best_next_action || 'System balanced.';
+    
+    const interopScore = getInteropScore($('battery-model').value, $('inverter-model').value);
+    $('decision-interop').innerText = `${interopScore}%`;
+    $('decision-interop').style.color = interopScore > 80 ? 'var(--success-color)' : 'var(--warning-color)';
+
     $('decision-savings').innerText = `+${symbol}${(p.savings_forecast.optimal_annual_savings||0).toFixed(0)}/yr`;
     $('decision-battery').innerText = roi.best_capacity > 0 ? `${roi.best_capacity} kWh` : '—';
     $('decision-system-cost').innerText = roi.estimated_system_cost > 0 ? `${symbol}${Math.round(roi.estimated_system_cost)}` : '—';
@@ -300,7 +307,14 @@ async function saveAnalysisToFirestore(data) {
             timestamp: new Date().toISOString(),
             label: `${$('country').value} — ${$('solar-kw').value}kW / ${$('battery-kwh').value}kWh`,
             data: data,
-            inputs: { country:$('country').value, solar:$('solar-kw').value, battery:$('battery-kwh').value, climate:$('climate').value }
+            inputs: { 
+                country:$('country').value, 
+                solar:$('solar-kw').value, 
+                battery:$('battery-kwh').value, 
+                climate:$('climate').value,
+                battery_model: $('battery-model').value,
+                inverter_model: $('inverter-model').value
+            }
         });
     } catch(e) {}
 }
@@ -345,6 +359,8 @@ async function viewPast(id) {
             $('solar-kw').value = h.inputs.solar;
             $('battery-kwh').value = h.inputs.battery;
             $('climate').value = h.inputs.climate;
+            if (h.inputs.battery_model) $('battery-model').value = h.inputs.battery_model;
+            if (h.inputs.inverter_model) $('inverter-model').value = h.inputs.inverter_model;
         }
         renderResults(h.data);
         showSection('results');
@@ -402,3 +418,32 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.onclick = () => {
 // Misc
 $('reset-btn')?.onclick = () => { showSection('analyzer'); window.scrollTo({top:0}); };
 $('download-report-btn')?.onclick = () => window.print();
+
+// ═══════════════════════════════════════════
+// HARDWARE INTEROP HELPERS
+// ═══════════════════════════════════════════
+
+const HARDWARE_SPECS = {
+    tesla_powerwall_2: { capacity: 13.5 },
+    byd_battery_box_lv: { capacity: 15.4 },
+    pylontech_us3000c: { capacity: 3.55 }
+};
+
+$('battery-model')?.addEventListener('change', (e) => {
+    const model = e.target.value;
+    if (HARDWARE_SPECS[model]) {
+        $('battery-kwh').value = HARDWARE_SPECS[model].capacity;
+        // Visual feedback
+        $('battery-kwh').style.borderColor = 'var(--success-color)';
+        setTimeout(() => { $('battery-kwh').style.borderColor = ''; }, 1000);
+    }
+});
+
+// Interop Score Calculation (Frontend visualization)
+function getInteropScore(batt, inv) {
+    if (batt === 'generic_lifepo4' || inv === 'generic') return 85;
+    // Specific pairings
+    if (inv === 'victron_multiplus_ii_5k' && batt === 'pylontech_us3000c') return 98; // Gold standard
+    if (inv === 'huawei_sun2000_6ktl' && batt === 'tesla_powerwall_2') return 70; // Requires bridge
+    return 90;
+}

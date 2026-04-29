@@ -126,6 +126,28 @@
                                 </div>
                             </div>
 
+                            <!-- NEW: Hardware Interoperability Selectors -->
+                            <div class="input-grid cols-2" style="margin-top:1rem;">
+                                <div class="input-group">
+                                    <label for="battery-model"><i class="fas fa-microchip"></i> Battery Hardware</label>
+                                    <select id="battery-model" class="brand-select">
+                                        <option value="generic_lifepo4">Generic LiFePO4</option>
+                                        <option value="tesla_powerwall_2">Tesla Powerwall 2</option>
+                                        <option value="byd_battery_box_lv">BYD B-Box Premium</option>
+                                        <option value="pylontech_us3000c">Pylontech US3000C</option>
+                                    </select>
+                                </div>
+                                <div class="input-group">
+                                    <label for="inverter-model"><i class="fas fa-server"></i> Inverter Platform</label>
+                                    <select id="inverter-model" class="brand-select">
+                                        <option value="generic">Generic Hybrid</option>
+                                        <option value="victron_multiplus_ii_5k">Victron MultiPlus-II</option>
+                                        <option value="huawei_sun2000_6ktl">Huawei SUN2000</option>
+                                        <option value="sma_sunny_boy_5">SMA Sunny Boy</option>
+                                    </select>
+                                </div>
+                            </div>
+
                             <div class="input-group">
                                 <label>Load Profile Template</label>
                                 <div class="profile-tiles" id="profile-tiles">
@@ -243,6 +265,7 @@
                             <div class="card-header"><i class="fas fa-gavel"></i><h3>Decision</h3></div>
                             <div class="decision-status" id="decision-status">—</div>
                             <p id="decision-reason" class="decision-reason"></p>
+                            <div class="decision-meta-row"><span>Hardware Interop</span><strong id="decision-interop" style="color:var(--primary-color);">—</strong></div>
                             <div class="decision-meta-row"><span>Annual Savings</span><strong id="decision-savings" style="color:var(--success-color);">—</strong></div>
                             <div class="decision-meta-row"><span>Optimal Storage</span><strong id="decision-battery">—</strong></div>
                             <div class="decision-meta-row"><span>Est. System Cost</span><strong id="decision-system-cost">—</strong></div>
