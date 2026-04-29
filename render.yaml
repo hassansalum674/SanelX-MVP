@@ -22,4 +22,4 @@ services:
     startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: ALLOWED_ORIGINS
-        value: "https://synex-frontend.onrender.com" # Update this once you have the URL
+        value: "https://synex-frontend.onrender.com,https://synex.sanelx.com"
