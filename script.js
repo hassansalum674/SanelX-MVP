@@ -5,7 +5,20 @@
 // --- Firebase ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
-import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+import { 
+    getFirestore, 
+    doc, 
+    setDoc, 
+    onSnapshot,
+    collection,
+    query,
+    where,
+    orderBy,
+    getDocs,
+    addDoc,
+    deleteDoc,
+    getDoc
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyChBYiaxQ2F58C0uBRopU-g6US0E9npLWo",
@@ -25,6 +38,7 @@ const API_BASE = window.SYNEX_CONFIG?.API_URL?.replace('/analyze', '') || 'http:
 const ANALYZE_URL = `${API_BASE}/analyze`;
 let currentUser = null;
 let chartInstance = null;
+let monthlyChartInstance = null;
 let authMode = 'signin';
 let userSettings = { currency: 'USD', solar_cost_preset: 1200, battery_cost_preset: 450 };
 
@@ -58,18 +72,20 @@ const REGION_COSTS = {
 };
 
 // ═══════════════════════════════════════════
-// UI HELPERS
+// UI NAVIGATION
 // ═══════════════════════════════════════════
 
-function $(id) { return document.getElementById(id); }
-function parseCommaList(str) { return str.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v)); }
+function showSection(id) {
+    $('analyzer').style.display = id === 'analyzer' ? 'grid' : 'none';
+    $('history-area').style.display = id === 'history' ? 'block' : 'none';
+    $('results-area').style.display = id === 'results' ? 'block' : 'none';
+    
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+    $(`nav-${id === 'results' ? 'analyzer' : id}`).classList.add('active');
+}
 
-// Mobile sidebar toggle
-const hamburger = $('hamburger-btn');
-const backdrop = $('sidebar-backdrop');
-const sidebar = $('app-sidebar');
-if (hamburger) hamburger.onclick = () => { sidebar.classList.toggle('open'); backdrop.classList.toggle('active'); };
-if (backdrop) backdrop.onclick = () => { sidebar.classList.remove('open'); backdrop.classList.remove('active'); };
+$('nav-analyzer')?.addEventListener('click', e => { e.preventDefault(); showSection('analyzer'); });
+$('nav-history')?.addEventListener('click', e => { e.preventDefault(); showSection('history'); loadHistory(); });
 
 // Settings modal
 const settingsModal = $('settings-modal');
@@ -220,8 +236,15 @@ function renderResults(data) {
         <div class="insight-item"><i class="fas fa-shield-alt"></i><div><strong>Reliability</strong><p>${advisor.reliability_note||'Standard grid-tied.'}</p></div></div>
     `;
 
-    // --- Chart ---
+    // --- Charts ---
+    const so = p.seasonal_outlook;
     renderChart(data.hourly);
+    if (so && so.monthly_forecast) renderMonthlyChart(so.monthly_forecast);
+
+    // --- Save to History (if logged in) ---
+    if (currentUser) {
+        saveAnalysisToFirestore(data);
+    }
 
     // --- Scenarios ---
     const sc = p.scenarios;
@@ -372,3 +395,158 @@ onAuthStateChanged(auth, user => { currentUser = user || null; updateAuthUI(); }
 
 $('download-report-btn')?.addEventListener('click', () => window.print());
 $('reset-btn')?.addEventListener('click', () => { $('results-area').style.display='none'; window.scrollTo({top:0,behavior:'smooth'}); });
+
+// ═══════════════════════════════════════════
+// NEW FEATURES IMPLEMENTATION
+// ═══════════════════════════════════════════
+
+function $(id) { return document.getElementById(id); }
+function parseCommaList(str) { return str.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v)); }
+
+// Restore Mobile sidebar toggle logic
+(function() {
+    const hamburger = $('hamburger-btn');
+    const backdrop = $('sidebar-backdrop');
+    const sidebar = $('app-sidebar');
+    if (hamburger) hamburger.onclick = () => { sidebar.classList.toggle('open'); backdrop.classList.toggle('active'); };
+    if (backdrop) backdrop.onclick = () => { sidebar.classList.remove('open'); backdrop.classList.remove('active'); };
+})();
+
+function renderMonthlyChart(monthlyData) {
+    const ctx = $('monthly-forecast-chart').getContext('2d');
+    if (monthlyChartInstance) monthlyChartInstance.destroy();
+    
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    
+    monthlyChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: months,
+            datasets: [
+                {
+                    label: 'Projected Monthly Cost',
+                    data: monthlyData.map(d => d.projected_cost),
+                    backgroundColor: 'rgba(88, 166, 255, 0.4)',
+                    borderColor: '#58a6ff',
+                    borderWidth: 1,
+                    borderRadius: 5
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: { beginAtZero: true, title: { display: true, text: 'Cost ($)', color: '#8b949e' }, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#8b949e' } },
+                x: { grid: { display: false }, ticks: { color: '#8b949e' } }
+            },
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+}
+
+async function saveAnalysisToFirestore(data) {
+    if (!currentUser) return;
+    try {
+        const country = $('country').value;
+        const solar = $('solar-kw').value;
+        const batt = $('battery-kwh').value;
+        
+        await addDoc(collection(dbFs, "users", currentUser.uid, "history"), {
+            timestamp: new Date().toISOString(),
+            label: `${country} — ${solar}kW Solar / ${batt}kWh Battery`,
+            country,
+            solar_kw: solar,
+            battery_kwh: batt,
+            summary: data.summary,
+            premium_insights: data.premium_insights,
+            assumptions: data.assumptions,
+            hourly: data.hourly,
+            advisor: data.advisor
+        });
+        console.log("Analysis saved to history.");
+    } catch (e) {
+        console.error("Error saving analysis:", e);
+    }
+}
+
+async function loadHistory() {
+    const list = $('history-list');
+    list.innerHTML = '<div class="loader-container"><div class="spinner"></div></div>';
+    
+    if (!currentUser) {
+        list.innerHTML = '<div class="glass-card span-2" style="text-align:center;"><p>Sign in to see your simulation history.</p><button class="primary-btn mt-1" onclick="openAuthModal()">Sign In</button></div>';
+        return;
+    }
+
+    try {
+        const q = query(collection(dbFs, "users", currentUser.uid, "history"), orderBy("timestamp", "desc"));
+        const snapshot = await getDocs(q);
+        
+        if (snapshot.empty) {
+            list.innerHTML = '<div class="glass-card span-2" style="text-align:center;"><p>No simulations saved yet. Run your first analysis to see it here!</p></div>';
+            return;
+        }
+
+        list.innerHTML = '';
+        snapshot.forEach(docSnap => {
+            const h = docSnap.data();
+            const date = new Date(h.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            
+            const card = document.createElement('div');
+            card.className = 'glass-card';
+            card.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+                    <div>
+                        <h4 style="margin-bottom:0.25rem;">${h.label}</h4>
+                        <small style="color:var(--text-secondary);">${date}</small>
+                    </div>
+                    <button class="delete-btn" data-id="${docSnap.id}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer;"><i class="fas fa-trash"></i></button>
+                </div>
+                <div class="kpi-body" style="flex-direction:row; gap:1rem; margin-bottom:1rem;">
+                    <div><small>Solar</small><br><strong>${h.summary.solar_coverage_percent.toFixed(0)}%</strong></div>
+                    <div><small>Payback</small><br><strong>${h.premium_insights.smart_recommendation.payback_years.toFixed(1)}y</strong></div>
+                    <div><small>Savings</small><br><strong style="color:var(--success-color);">+$${h.premium_insights.savings_forecast.optimal_annual_savings.toFixed(0)}</strong></div>
+                </div>
+                <button class="secondary-btn full-width view-past-btn" data-id="${docSnap.id}">View Analysis</button>
+            `;
+            list.appendChild(card);
+        });
+
+        // Attach listeners
+        document.querySelectorAll('.view-past-btn').forEach(btn => {
+            btn.onclick = () => viewPastAnalysis(btn.dataset.id);
+        });
+        document.querySelectorAll('.delete-btn').forEach(btn => {
+            btn.onclick = (e) => { e.stopPropagation(); deleteAnalysis(btn.dataset.id); };
+        });
+
+    } catch (e) {
+        list.innerHTML = `<div class="error-msg">Error loading history: ${e.message}</div>`;
+    }
+}
+
+async function viewPastAnalysis(id) {
+    try {
+        const docSnap = await getDoc(doc(dbFs, "users", currentUser.uid, "history", id));
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            renderResults(data);
+            showSection('results');
+        }
+    } catch (e) {
+        alert("Error loading specific analysis.");
+    }
+}
+
+async function deleteAnalysis(id) {
+    if (!confirm("Are you sure you want to delete this analysis?")) return;
+    try {
+        await deleteDoc(doc(dbFs, "users", currentUser.uid, "history", id));
+        loadHistory();
+    } catch (e) {
+        alert("Error deleting analysis.");
+    }
+}

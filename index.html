@@ -194,8 +194,21 @@
                 </section>
             </div>
 
-            <!-- ── RESULTS SECTION ── -->
-            <div id="results-area" style="display:none; margin-top:2rem;">
+            <!-- History Section (Dynamic) -->
+            <div id="history-area" style="display:none; margin-top:2rem;">
+                <div class="page-header">
+                    <div class="page-title">
+                        <h2>Simulation History</h2>
+                        <p>Access and compare your past energy analyses.</p>
+                    </div>
+                </div>
+                <div id="history-list" class="dashboard-grid">
+                    <!-- History items injected via script.js -->
+                </div>
+            </div>
+
+            <!-- Results Section (Dynamic) -->
+            <div id="results-area" class="results-section" style="display:none; margin-top:2rem;">
 
                 <!-- KPI Summary Cards -->
                 <div class="kpi-grid" id="kpi-grid">
@@ -272,6 +285,15 @@
                     <div class="card-header"><i class="fas fa-chart-area"></i><h3>24-Hour Energy Flow</h3></div>
                     <div class="chart-container">
                         <canvas id="energy-chart"></canvas>
+                    </div>
+                </section>
+
+                <!-- Monthly Forecast Chart -->
+                <section class="glass-card" style="margin-top:2rem;">
+                    <div class="card-header"><i class="fas fa-calendar-alt"></i><h3>12-Month Billing Forecast</h3></div>
+                    <p style="color:var(--text-secondary); font-size:0.9rem; margin-bottom:1rem;">Estimated monthly grid costs based on seasonal solar production variation.</p>
+                    <div class="chart-container" style="height: 300px;">
+                        <canvas id="monthly-forecast-chart"></canvas>
                     </div>
                 </section>
 

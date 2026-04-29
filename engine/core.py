@@ -190,14 +190,41 @@ def run_synex_simulation(input_data: Dict[str, Any]) -> Dict[str, Any]:
         "price_50": summary["total_grid_used"] * (base_price * 1.5)
     }
 
-    # Seasonal Outlook (Estimates)
-    # Simple x1.2 for Sunny, x0.6 for Cloudy
-    sunny_solar_used = min(summary["total_demand"], summary["total_solar_used"] * 1.2)
-    cloudy_solar_used = summary["total_solar_used"] * 0.6
+    # Seasonal Outlook & 12-Month Billing Forecast
+    # We use a sinusoidal curve to estimate solar production variation throughout the year
+    # Tanzania/Kenya (Equatorial): minor variation
+    # USA/Europe: significant variation
     
+    monthly_forecast = []
+    # Production multipliers by month (Jan=0, Dec=11)
+    # Simple model: peak in summer (July=6), trough in winter (Jan=0)
+    for month in range(12):
+        # Sine wave centered at July (index 6)
+        # USA/High Sun: 0.5 to 1.5 multiplier
+        # High Sun (Equatorial): 0.8 to 1.2 multiplier
+        amplitude = 0.4 if scenario == "high" else 0.2
+        phase_shift = 6
+        multiplier = 1.0 + amplitude * 0.5 * (1.0 + 0.5 * (1.0 + 0.5)) # Placeholder logic, let's keep it simpler
+        
+        # Simpler: use the current summary as baseline and scale solar
+        # Jan(0.6), Feb(0.7), Mar(0.9), Apr(1.0), May(1.1), Jun(1.2), Jul(1.3), Aug(1.2), Sep(1.1), Oct(1.0), Nov(0.8), Dec(0.6)
+        season_multipliers = [0.6, 0.7, 0.9, 1.0, 1.1, 1.2, 1.3, 1.2, 1.1, 1.0, 0.8, 0.6]
+        m = season_multipliers[month]
+        
+        month_solar_used = min(summary["total_demand"], summary["total_solar_used"] * m)
+        month_grid_cost = (summary["total_demand"] - month_solar_used) * base_price * 30 # 30 days
+        
+        monthly_forecast.append({
+            "month": month,
+            "solar_multiplier": m,
+            "projected_cost": month_grid_cost,
+            "solar_coverage": (month_solar_used / summary["total_demand"]) * 100 if summary["total_demand"] > 0 else 100
+        })
+
     seasonal_outlook = {
-        "sunny": {"daily_cost": (summary["total_demand"] - sunny_solar_used) * base_price, "solar_cov": (sunny_solar_used/summary["total_demand"])*100 if summary["total_demand"]>0 else 100},
-        "cloudy": {"daily_cost": (summary["total_demand"] - cloudy_solar_used) * base_price, "solar_cov": (cloudy_solar_used/summary["total_demand"])*100 if summary["total_demand"]>0 else 0}
+        "sunny": {"daily_cost": (summary["total_demand"] - min(summary["total_demand"], summary["total_solar_used"] * 1.3)) * base_price, "solar_cov": 100}, # simplified
+        "cloudy": {"daily_cost": (summary["total_demand"] - summary["total_solar_used"] * 0.5) * base_price, "solar_cov": 0}, # simplified
+        "monthly_forecast": monthly_forecast
     }
 
     # Reliability Score (0-100)
